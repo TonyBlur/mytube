@@ -27,6 +27,34 @@ main
   max-width: 1024px
   margin: 2.5rem auto
 
+.url-entry-wrap
+  display: flex
+  gap: .75rem
+  align-items: stretch
+
+.url-entry-textarea
+  min-height: 8.25rem
+  max-height: 12rem
+  resize: none
+  overflow-y: auto
+
+.url-entry-actions
+  display: flex
+  flex-direction: column
+  gap: .5rem
+  width: 11rem
+
+  .btn
+    flex: 1
+    white-space: nowrap
+
+@media (max-width: 767.98px)
+  .url-entry-wrap
+    flex-direction: column
+
+  .url-entry-actions
+    width: 100%
+
 .card
   border: 1px solid color-mix(in srgb, var(--bs-border-color) 75%, transparent)
   border-radius: var(--mt-radius-lg)

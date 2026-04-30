@@ -131,32 +131,18 @@
             }
           </ng-template>
 
-          <!-- Narrow viewports: full-width field, then Bootstrap btn-group (no faux input-group strip) -->
-          <div class="vstack gap-2 d-md-none">
-            <input type="text"
+          <div class="url-entry-wrap shadow-sm">
+            <textarea
               autocomplete="off"
               spellcheck="false"
-              class="form-control form-control-lg"
+              class="form-control form-control-lg url-entry-textarea"
               placeholder="Enter one or multiple links (separate with spaces, commas, or newlines)"
               [(ngModel)]="addUrl"
               [ngModelOptions]="{standalone: true}"
-              [disabled]="addInProgress || subscribeInProgress || downloads.loading">
-            <div class="btn-group w-100" role="group" aria-label="Download or subscribe">
+              [disabled]="addInProgress || subscribeInProgress || downloads.loading"></textarea>
+            <div class="url-entry-actions" aria-label="Download or subscribe">
               <ng-container [ngTemplateOutlet]="urlBarActions" />
             </div>
-          </div>
-
-          <!-- md and up: standard input-group so Bootstrap handles fused borders -->
-          <div class="input-group input-group-lg shadow-sm d-none d-md-flex">
-            <input type="text"
-              autocomplete="off"
-              spellcheck="false"
-              class="form-control form-control-lg"
-              placeholder="Enter one or multiple links (separate with spaces, commas, or newlines)"
-              [(ngModel)]="addUrl"
-              [ngModelOptions]="{standalone: true}"
-              [disabled]="addInProgress || subscribeInProgress || downloads.loading">
-            <ng-container [ngTemplateOutlet]="urlBarActions" />
           </div>
         </div>
       </div>
