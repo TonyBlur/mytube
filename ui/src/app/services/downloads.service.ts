@@ -152,7 +152,7 @@ export class DownloadsService {
     const ce = payload.clipEnd?.trim();
     if (cs) body['clip_start'] = cs;
     if (ce) body['clip_end'] = ce;
-    const headers = this.socket.ioSocket?.id ? { 'X-Client-Id': this.socket.ioSocket.id } : undefined;
+    const headers = { 'X-Visit-Id': this.socket.getVisitId() };
     return this.http.post<Status>('add', body, { headers }).pipe(
       catchError(this.handleHTTPError)
     );

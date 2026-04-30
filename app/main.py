@@ -446,50 +446,59 @@ def _migrate_legacy_request(post: dict) -> dict:
     return post
 
 
-public_client_downloads: dict[str, set[str]] = {}
+public_visit_downloads: dict[str, set[str]] = {}
 public_download_owner: dict[str, str] = {}
 public_download_owner_by_id: dict[str, str] = {}
+public_visit_sids: dict[str, set[str]] = {}
+public_sid_visit: dict[str, str] = {}
 
 
-def _register_public_download(sid: str, url: str):
-    if not sid or not url:
+def _register_public_download(visit_id: str, url: str):
+    if not visit_id or not url:
         return
-    public_client_downloads.setdefault(sid, set()).add(url)
-    public_download_owner[url] = sid
+    public_visit_downloads.setdefault(visit_id, set()).add(url)
+    public_download_owner[url] = visit_id
 
 
 def _forget_public_download(url: str | None = None, *, dl_id: str | None = None):
-    sid = None
+    visit_id = None
     if dl_id:
-        sid = public_download_owner_by_id.pop(dl_id, None)
-    if sid is None and url:
-        sid = public_download_owner.pop(url, None)
-    if not sid:
+        visit_id = public_download_owner_by_id.pop(dl_id, None)
+    if visit_id is None and url:
+        visit_id = public_download_owner.pop(url, None)
+    if not visit_id:
         return
-    urls = public_client_downloads.get(sid)
+    urls = public_visit_downloads.get(visit_id)
     if not urls:
         return
-    urls.discard(url)
+    if url:
+        urls.discard(url)
     if not urls:
-        public_client_downloads.pop(sid, None)
+        public_visit_downloads.pop(visit_id, None)
 
 
 async def _emit_download_event(event: str, payload, *, url: str | None = None, dl_id: str | None = None):
     if not config.PUBLIC_MODE:
         await sio.emit(event, payload)
         return
-    if not url:
+    visit_id = (public_download_owner_by_id.get(dl_id) if dl_id else None) or (public_download_owner.get(url) if url else None)
+    if not visit_id:
         return
-    sid = (public_download_owner_by_id.get(dl_id) if dl_id else None) or (public_download_owner.get(url) if url else None)
-    if sid:
+    for sid in list(public_visit_sids.get(visit_id, set())):
         await sio.emit(event, payload, to=sid)
+
+
+def _public_visit_from_environ(environ: dict) -> str:
+    qs = parse_qs(environ.get('QUERY_STRING', ''))
+    return (qs.get('visit_id', [''])[0] or '').strip()
+
 
 class Notifier(DownloadQueueNotifier):
     async def added(self, dl):
         log.info(f"Notifier: Download added - {dl.title}")
-        sid = public_download_owner.get(dl.url)
-        if sid:
-            public_download_owner_by_id[dl.id] = sid
+        visit_id = public_download_owner.get(dl.url)
+        if visit_id:
+            public_download_owner_by_id[dl.id] = visit_id
         await _emit_download_event('added', serializer.encode(dl), url=dl.url, dl_id=dl.id)
 
     async def updated(self, dl):
@@ -770,10 +779,10 @@ async def add(request):
         o['auto_start'],
     )
     if config.PUBLIC_MODE:
-        sid = request.headers.get('X-Client-Id', '').strip()
-        if not sid:
-            raise web.HTTPBadRequest(reason='missing X-Client-Id in public mode')
-        _register_public_download(sid, o['url'])
+        visit_id = request.headers.get('X-Visit-Id', '').strip()
+        if not visit_id:
+            raise web.HTTPBadRequest(reason='missing X-Visit-Id in public mode')
+        _register_public_download(visit_id, o['url'])
     status = await dqueue.add(
         o['url'],
         o['download_type'],
@@ -1017,6 +1026,11 @@ async def history(request):
 async def connect(sid, environ):
     log.info(f"Client connected: {sid}")
     if config.PUBLIC_MODE:
+        visit_id = _public_visit_from_environ(environ)
+        if visit_id:
+            public_sid_visit[sid] = visit_id
+            public_visit_sids.setdefault(visit_id, set()).add(sid)
+    if config.PUBLIC_MODE:
         await sio.emit('all', serializer.encode(([], [])), to=sid)
     else:
         await sio.emit('all', serializer.encode(dqueue.get()), to=sid)
@@ -1032,10 +1046,21 @@ async def connect(sid, environ):
 async def disconnect(sid):
     if not config.PUBLIC_MODE:
         return
-    owned = list(public_client_downloads.pop(sid, set()))
+    visit_id = public_sid_visit.pop(sid, '')
+    if not visit_id:
+        return
+    sids = public_visit_sids.get(visit_id, set())
+    sids.discard(sid)
+    if sids:
+        return
+    public_visit_sids.pop(visit_id, None)
+    owned = list(public_visit_downloads.pop(visit_id, set()))
     for url in owned:
         public_download_owner.pop(url, None)
-        public_download_owner_by_id.pop(url, None)
+    # remove any lingering id ownership for this visit
+    for dl_id, owner in list(public_download_owner_by_id.items()):
+        if owner == visit_id:
+            public_download_owner_by_id.pop(dl_id, None)
     if owned:
         await dqueue.cancel(owned)
 
