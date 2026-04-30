@@ -375,6 +375,10 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
     return this.downloads.configuration['ALLOW_YTDL_OPTIONS_OVERRIDES'] === true;
   }
 
+  isPublicMode() {
+    return this.downloads.configuration['PUBLIC_MODE'] === true;
+  }
+
   allowCustomDir(tag: string) {
     if (this.downloads.configuration['CREATE_CUSTOM_DIRS']) {
       return tag;

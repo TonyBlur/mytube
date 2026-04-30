@@ -1,8 +1,8 @@
 <nav class="navbar navbar-expand-md navbar-dark">
   <div class="container-fluid">
     <a class="navbar-brand d-flex align-items-center" href="#">
-      <img src="assets/icons/android-chrome-192x192.png" alt="MeTube Logo" height="32" class="me-2">
-      MeTube
+      <img src="assets/icons/android-chrome-192x192.png" alt="MyTube Logo" height="32" class="me-2">
+      MyTube
     </a>
     <div class="download-metrics">
       @if (activeDownloads > 0) {
@@ -123,7 +123,7 @@
               </button>
               <button class="btn btn-outline-secondary btn-lg px-3" type="button"
                 (click)="addSubscription()"
-                [disabled]="downloads.loading">
+                [disabled]="downloads.loading || isPublicMode()">
                 Subscribe
               </button>
             }
@@ -135,7 +135,7 @@
               autocomplete="off"
               spellcheck="false"
               class="form-control form-control-lg"
-              placeholder="Enter video, channel, or playlist URL"
+              placeholder="Enter one or multiple links (separate with spaces, commas, or newlines)"
               [(ngModel)]="addUrl"
               [ngModelOptions]="{standalone: true}"
               [disabled]="addInProgress || subscribeInProgress || downloads.loading">
@@ -150,7 +150,7 @@
               autocomplete="off"
               spellcheck="false"
               class="form-control form-control-lg"
-              placeholder="Enter video, channel, or playlist URL"
+              placeholder="Enter one or multiple links (separate with spaces, commas, or newlines)"
               [(ngModel)]="addUrl"
               [ngModelOptions]="{standalone: true}"
               [disabled]="addInProgress || subscribeInProgress || downloads.loading">
@@ -893,6 +893,7 @@
     </table>
   </div>
 
+  @if (!isPublicMode()) {
   <div class="metube-section-header">Subscriptions</div>
   <div class="px-2 py-3 border-bottom">
     @if (checkingAllSubscriptions) {
@@ -1041,6 +1042,7 @@
       </tbody>
     </table>
   </div>
+  }
 </main><!-- /.container -->
 
 <footer class="footer navbar-dark bg-dark py-3 mt-5">
@@ -1053,7 +1055,7 @@
         </div>
         <div class="version-separator"></div>
         <div class="version-item">
-          <span class="version-label">MeTube</span>
+          <span class="version-label">MyTube</span>
           <span class="version-value">{{metubeVersion}}</span>
         </div>
         <div class="version-separator"></div>
@@ -1066,7 +1068,7 @@
         @if (ytDlpOptionsUpdateTime) {
           <div class="version-separator"></div>
         }
-        <a href="https://github.com/alexta69/metube" target="_blank" class="github-link">
+        <a href="https://github.com/TonyBlur/mytube" target="_blank" class="github-link">
           <fa-icon [icon]="faGithub" />
           <span>GitHub</span>
         </a>

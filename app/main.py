@@ -73,9 +73,10 @@ class Config:
         'MAX_CONCURRENT_DOWNLOADS': '3',
         'LOGLEVEL': 'INFO',
         'ENABLE_ACCESSLOG': 'false',
+        'PUBLIC_MODE': 'false',
     }
 
-    _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'HTTPS', 'ENABLE_ACCESSLOG', 'ALLOW_YTDL_OPTIONS_OVERRIDES')
+    _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'HTTPS', 'ENABLE_ACCESSLOG', 'ALLOW_YTDL_OPTIONS_OVERRIDES', 'PUBLIC_MODE')
 
     def __init__(self):
         for k, v in self._DEFAULTS.items():
@@ -135,6 +136,7 @@ class Config:
         'DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT',
         'SUBSCRIPTION_DEFAULT_CHECK_INTERVAL',
         'ALLOW_YTDL_OPTIONS_OVERRIDES',
+        'PUBLIC_MODE',
     )
 
     def frontend_safe(self) -> dict:
@@ -760,6 +762,8 @@ async def cancel_add(request):
 
 @routes.post(config.URL_PREFIX + 'subscribe')
 async def subscribe(request):
+    if config.PUBLIC_MODE:
+        raise web.HTTPForbidden(reason='subscriptions are disabled in public mode')
     post = await _read_json_request(request)
     try:
         o = parse_download_options(post)
@@ -811,11 +815,15 @@ async def subscribe(request):
 
 @routes.get(config.URL_PREFIX + 'subscriptions')
 async def subscriptions_list(request):
+    if config.PUBLIC_MODE:
+        return web.Response(text=serializer.encode([]))
     return web.Response(text=serializer.encode([s.to_public_dict() for s in submgr.list_all()]))
 
 
 @routes.post(config.URL_PREFIX + 'subscriptions/update')
 async def subscriptions_update(request):
+    if config.PUBLIC_MODE:
+        raise web.HTTPForbidden(reason='subscriptions are disabled in public mode')
     post = await _read_json_request(request)
     sub_id = post.get('id')
     if not sub_id:
@@ -835,6 +843,8 @@ async def subscriptions_update(request):
 
 @routes.post(config.URL_PREFIX + 'subscriptions/delete')
 async def subscriptions_delete(request):
+    if config.PUBLIC_MODE:
+        raise web.HTTPForbidden(reason='subscriptions are disabled in public mode')
     post = await _read_json_request(request)
     ids = post.get('ids')
     if not ids or not isinstance(ids, list):
@@ -845,6 +855,8 @@ async def subscriptions_delete(request):
 
 @routes.post(config.URL_PREFIX + 'subscriptions/check')
 async def subscriptions_check(request):
+    if config.PUBLIC_MODE:
+        raise web.HTTPForbidden(reason='subscriptions are disabled in public mode')
     post = await _read_json_request(request)
     ids = post.get('ids')
     if ids is not None and not isinstance(ids, list):
@@ -955,8 +967,12 @@ async def history(request):
 @sio.event
 async def connect(sid, environ):
     log.info(f"Client connected: {sid}")
-    await sio.emit('all', serializer.encode(dqueue.get()), to=sid)
-    await sio.emit('subscriptions_all', serializer.encode([s.to_public_dict() for s in submgr.list_all()]), to=sid)
+    if config.PUBLIC_MODE:
+        await sio.emit('all', serializer.encode(([], [])), to=sid)
+    else:
+        await sio.emit('all', serializer.encode(dqueue.get()), to=sid)
+    if not config.PUBLIC_MODE:
+        await sio.emit('subscriptions_all', serializer.encode([s.to_public_dict() for s in submgr.list_all()]), to=sid)
     await sio.emit('configuration', serializer.encode(config.frontend_safe()), to=sid)
     if config.CUSTOM_DIRS:
         await sio.emit('custom_dirs', serializer.encode(get_custom_dirs()), to=sid)

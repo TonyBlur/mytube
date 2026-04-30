@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "metube": {
+    "mytube": {
       "projectType": "application",
       "schematics": {
         "@schematics/angular:component": {
@@ -18,7 +18,7 @@
           "builder": "@angular/build:application",
           "options": {
             "outputPath": {
-              "base": "dist/metube"
+              "base": "dist/mytube"
             },
             "index": "src/index.html",
             "tsConfig": "tsconfig.app.json",
@@ -72,10 +72,10 @@
           "builder": "@angular/build:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "metube:build:production"
+              "buildTarget": "mytube:build:production"
             },
              "development": {
-              "buildTarget": "metube:build:development",
+              "buildTarget": "mytube:build:development",
               "proxyConfig": "proxy.conf.json"
             }
           },
