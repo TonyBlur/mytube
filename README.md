@@ -39,6 +39,10 @@ services:
 
 Certain values can be set via environment variables, using the `-e` parameter on the docker command line, or the `environment:` section in docker-compose.
 
+You can also load variables from files:
+* Docker CLI supports `--env-file /path/to/.env`.
+* The container entrypoint auto-loads `/app/.env` if present, and also loads a custom file when `ENV_FILE` points to it.
+
 ### ⬇️ Download Behavior
 
 * __MAX_CONCURRENT_DOWNLOADS__: Maximum number of simultaneous downloads allowed. For example, if set to `5`, then at most five downloads will run concurrently, and any additional downloads will wait until one of the active downloads completes. Defaults to `3`. 
