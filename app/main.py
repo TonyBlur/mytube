@@ -448,6 +448,7 @@ def _migrate_legacy_request(post: dict) -> dict:
 
 public_client_downloads: dict[str, set[str]] = {}
 public_download_owner: dict[str, str] = {}
+public_download_owner_by_id: dict[str, str] = {}
 
 
 def _register_public_download(sid: str, url: str):
@@ -457,8 +458,12 @@ def _register_public_download(sid: str, url: str):
     public_download_owner[url] = sid
 
 
-def _forget_public_download(url: str):
-    sid = public_download_owner.pop(url, None)
+def _forget_public_download(url: str | None = None, *, dl_id: str | None = None):
+    sid = None
+    if dl_id:
+        sid = public_download_owner_by_id.pop(dl_id, None)
+    if sid is None and url:
+        sid = public_download_owner.pop(url, None)
     if not sid:
         return
     urls = public_client_downloads.get(sid)
@@ -469,38 +474,41 @@ def _forget_public_download(url: str):
         public_client_downloads.pop(sid, None)
 
 
-async def _emit_download_event(event: str, payload, *, url: str | None = None):
+async def _emit_download_event(event: str, payload, *, url: str | None = None, dl_id: str | None = None):
     if not config.PUBLIC_MODE:
         await sio.emit(event, payload)
         return
     if not url:
         return
-    sid = public_download_owner.get(url)
+    sid = (public_download_owner_by_id.get(dl_id) if dl_id else None) or (public_download_owner.get(url) if url else None)
     if sid:
         await sio.emit(event, payload, to=sid)
 
 class Notifier(DownloadQueueNotifier):
     async def added(self, dl):
         log.info(f"Notifier: Download added - {dl.title}")
-        await _emit_download_event('added', serializer.encode(dl), url=dl.url)
+        sid = public_download_owner.get(dl.url)
+        if sid:
+            public_download_owner_by_id[dl.id] = sid
+        await _emit_download_event('added', serializer.encode(dl), url=dl.url, dl_id=dl.id)
 
     async def updated(self, dl):
         log.debug(f"Notifier: Download updated - {dl.title}")
-        await _emit_download_event('updated', serializer.encode(dl), url=dl.url)
+        await _emit_download_event('updated', serializer.encode(dl), url=dl.url, dl_id=dl.id)
 
     async def completed(self, dl):
         log.info(f"Notifier: Download completed - {dl.title}")
-        await _emit_download_event('completed', serializer.encode(dl), url=dl.url)
-        _forget_public_download(dl.url)
+        await _emit_download_event('completed', serializer.encode(dl), url=dl.url, dl_id=dl.id)
+        _forget_public_download(dl.url, dl_id=dl.id)
 
     async def canceled(self, id):
         log.info(f"Notifier: Download canceled - {id}")
-        await _emit_download_event('canceled', serializer.encode(id), url=id)
-        _forget_public_download(id)
+        await _emit_download_event('canceled', serializer.encode(id), url=id, dl_id=id)
+        _forget_public_download(id, dl_id=id)
 
     async def cleared(self, id):
         log.info(f"Notifier: Download cleared - {id}")
-        await _emit_download_event('cleared', serializer.encode(id), url=id)
+        await _emit_download_event('cleared', serializer.encode(id), url=id, dl_id=id)
 
 dqueue = DownloadQueue(config, Notifier())
 app.on_startup.append(lambda app: dqueue.initialize())
@@ -1027,6 +1035,7 @@ async def disconnect(sid):
     owned = list(public_client_downloads.pop(sid, set()))
     for url in owned:
         public_download_owner.pop(url, None)
+        public_download_owner_by_id.pop(url, None)
     if owned:
         await dqueue.cancel(owned)
 
