@@ -121,11 +121,13 @@
                 [disabled]="downloads.loading">
                 Download
               </button>
+              @if (!isPublicMode()) {
               <button class="btn btn-outline-secondary btn-lg px-3" type="button"
                 (click)="addSubscription()"
-                [disabled]="downloads.loading || isPublicMode()">
+                [disabled]="downloads.loading">
                 Subscribe
               </button>
+              }
             }
           </ng-template>
 
