@@ -1,6 +1,3 @@
-## Fork note
-This project is forked from [alexta69/metube](https://github.com/alexta69/metube).
-
 # MyTube
 
 ![Build Status](https://github.com/TonyBlur/mytube/actions/workflows/main.yml/badge.svg)
@@ -23,6 +20,8 @@ docker run -d -p 8081:8081 -v /path/to/downloads:/downloads ghcr.io/tonyblur/myt
 
 ## 🐳 Run using docker-compose
 
+Save the following to `docker-compose.yml` in your working directory, update `/path/to/downloads` to your desired download location, then run `docker-compose up -d`:
+
 ```yaml
 services:
   mytube:
@@ -33,25 +32,44 @@ services:
       - "8081:8081"
     volumes:
       - /path/to/downloads:/downloads
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - MAX_CONCURRENT_DOWNLOADS=3
+```
+
+A complete [docker-compose.yml](docker-compose.yml) with all available configuration options is included in the repository. Use it as a template for advanced setups, or quickly start with:
+
+```bash
+docker-compose up -d
+```
+
+Logs can be viewed with:
+```bash
+docker-compose logs -f mytube
 ```
 
 ## ⚙️ Configuration via environment variables
 
-Certain values can be set via environment variables, using the `-e` parameter on the docker command line, or the `environment:` section in docker-compose.
+### Setting environment variables
 
-You can also load variables from files:
-* Docker CLI supports `--env-file /path/to/.env`.
-* The container entrypoint auto-loads `/app/.env` if present, and also loads a custom file when `ENV_FILE` points to it.
+**Docker CLI:** `docker run -e PORT=9000 -e MAX_CONCURRENT_DOWNLOADS=5 ghcr.io/tonyblur/mytube`
+
+**docker-compose:** Add `environment:` section with key-value pairs (see [docker-compose.yml](docker-compose.yml) for examples).
+
+**From .env file:** `docker-compose --env-file .env up` or mount `/path/to/.env:/app/.env:ro` in volumes.
+
+### Available variables
 
 ### ⬇️ Download Behavior
 
-* __MAX_CONCURRENT_DOWNLOADS__: Maximum number of simultaneous downloads allowed. For example, if set to `5`, then at most five downloads will run concurrently, and any additional downloads will wait until one of the active downloads completes. Defaults to `3`. 
-* __DELETE_FILE_ON_TRASHCAN__: if `true`, downloaded files are deleted on the server, when they are trashed from the "Completed" section of the UI. Defaults to `false`.
-* __DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT__: Maximum number of playlist items that can be downloaded. Defaults to `0` (no limit).
-* __SUBSCRIPTION_DEFAULT_CHECK_INTERVAL__: Default minutes between automatic checks for each subscription. Defaults to `60`.
-* __SUBSCRIPTION_SCAN_PLAYLIST_END__: Maximum playlist/channel entries to fetch per subscription check (newest-first). Defaults to `50`.
-* __SUBSCRIPTION_MAX_SEEN_IDS__: Cap on stored video IDs per subscription to limit state file growth. Defaults to `50000`.
-* __CLEAR_COMPLETED_AFTER__: Number of seconds after which completed (and failed) downloads are automatically removed from the "Completed" list. Defaults to `0` (disabled).
+* __MAX_CONCURRENT_DOWNLOADS__: Max simultaneous downloads. Defaults to `3`. 
+* __DELETE_FILE_ON_TRASHCAN__: Delete files when trashed from UI. Defaults to `false`.
+* __DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT__: Max playlist items to download. Defaults to `0` (no limit).
+* __SUBSCRIPTION_DEFAULT_CHECK_INTERVAL__: Minutes between subscription checks. Defaults to `60`.
+* __SUBSCRIPTION_SCAN_PLAYLIST_END__: Max playlist/channel entries per check. Defaults to `50`.
+* __SUBSCRIPTION_MAX_SEEN_IDS__: Cap on stored video IDs per subscription. Defaults to `50000`.
+* __CLEAR_COMPLETED_AFTER__: Seconds until auto-removing completed downloads. Defaults to `0` (disabled).
 
 ### 📁 Storage & Directories
 
@@ -393,3 +411,6 @@ docker build -t mytube .
 ```
 
 Note that if you're running the server in VSCode, your downloads will go to your user's Downloads folder (this is configured via the environment in `.vscode/launch.json`).
+
+## 🍴 Fork note
+This project is forked from [alexta69/metube](https://github.com/alexta69/metube).
