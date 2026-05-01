@@ -65,6 +65,10 @@ You can also load variables from files:
 * Docker CLI supports `--env-file /path/to/.env`.
 * The container entrypoint auto-loads `/app/.env` if present, and also loads a custom file when `ENV_FILE` points to it.
 
+You can also load variables from files:
+* Docker CLI supports `--env-file /path/to/.env`.
+* The container entrypoint auto-loads `/app/.env` if present, and also loads a custom file when `ENV_FILE` points to it.
+
 ### ⬇️ Download Behavior
 
 * __MAX_CONCURRENT_DOWNLOADS__: Max simultaneous downloads. Defaults to `3`. 
