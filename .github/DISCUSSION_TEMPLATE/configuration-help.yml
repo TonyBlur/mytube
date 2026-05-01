@@ -13,9 +13,9 @@ body:
       options:
         - label: I have searched existing discussions and issues for similar configuration problems
           required: true
-        - label: I have read the [configuration section](https://github.com/alexta69/metube#%EF%B8%8F-configuration-via-environment-variables) in the README
+        - label: I have read the [configuration section](https://github.com/TonyBlur/mytube#%EF%B8%8F-configuration-via-environment-variables) in the README
           required: true
-        - label: I have checked the [Wiki](https://github.com/alexta69/metube/wiki) for configuration examples
+        - label: I have checked the [Wiki](https://github.com/TonyBlur/mytube/wiki) for configuration examples
           required: true
 
   - type: markdown
@@ -24,9 +24,9 @@ body:
         ## Configuration Resources
         
         Before asking for help, please check these resources:
-        - **[Configuration Guide](https://github.com/alexta69/metube#%EF%B8%8F-configuration-via-environment-variables)** - All available environment variables
-        - **[YTDL_OPTIONS Cookbook](https://github.com/alexta69/metube/wiki/YTDL_OPTIONS-Cookbook)** - Common yt-dlp configurations
-        - **[OUTPUT_TEMPLATE Cookbook](https://github.com/alexta69/metube/wiki/OUTPUT_TEMPLATE-Cookbook)** - Filename template examples
+        - **[Configuration Guide](https://github.com/TonyBlur/mytube#%EF%B8%8F-configuration-via-environment-variables)** - All available environment variables
+        - **[YTDL_OPTIONS Cookbook](https://github.com/TonyBlur/mytube/wiki/YTDL_OPTIONS-Cookbook)** - Common yt-dlp configurations
+        - **[OUTPUT_TEMPLATE Cookbook](https://github.com/TonyBlur/mytube/wiki/OUTPUT_TEMPLATE-Cookbook)** - Filename template examples
 
   - type: textarea
     id: configuration-goal
@@ -53,7 +53,7 @@ body:
         
         Environment Details:
         - MeTube version: [e.g., latest, specific version]
-        - Docker image: [e.g., ghcr.io/alexta69/metube:latest]
+        - Docker image: [e.g., ghcr.io/tonyblur/mytube:latest]
         - Operating System: [e.g., Ubuntu 20.04, Windows 10, macOS 12]
         
         Error Messages or Issues:
