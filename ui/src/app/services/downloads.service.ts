@@ -1,5 +1,5 @@
 import { inject, Injectable } from '@angular/core';
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { of, Subject } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { MeTubeSocket } from './metube-socket.service';
@@ -135,7 +135,7 @@ export class DownloadsService {
       : (typeof error.error === 'string'
           ? error.error
           : (error.error?.msg || error.message || 'Request failed'));
-    return of({ status: 'error', msg });
+    return of<Status>({ status: 'error', msg });
   }
 
   public add(payload: AddDownloadPayload) {
@@ -160,9 +160,10 @@ export class DownloadsService {
     const ce = payload.clipEnd?.trim();
     if (cs) body['clip_start'] = cs;
     if (ce) body['clip_end'] = ce;
-    const headers = { 'X-Visit-Id': this.socket.getVisitId() };
+    const visitId = typeof this.socket.getVisitId === 'function' ? this.socket.getVisitId() : '';
+    const headers = visitId ? new HttpHeaders({ 'X-Visit-Id': visitId }) : undefined;
     return this.http.post<Status>('add', body, { headers }).pipe(
-      catchError(this.handleHTTPError)
+      catchError((error: HttpErrorResponse) => this.handleHTTPError(error))
     );
   }
 
