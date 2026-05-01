@@ -44,6 +44,11 @@ export class DownloadsService {
   configuration: Record<string, unknown> = {};
   customDirs: Record<string, string[]> = {};
 
+  private getDownloadKey(download: Download): string {
+    const maybeKey = (download as Download & { key?: string }).key;
+    return maybeKey && maybeKey.length > 0 ? maybeKey : download.url;
+  }
+
   constructor() {
     this.socket.fromEvent('all')
     .pipe(takeUntilDestroyed())
@@ -61,25 +66,28 @@ export class DownloadsService {
     .pipe(takeUntilDestroyed())
     .subscribe((strdata: string) => {
       const data: Download = JSON.parse(strdata);
-      this.queue.set(data.url, data);
+      const key = this.getDownloadKey(data);
+      this.queue.set(key, data);
       this.queueChanged.next();
     });
     this.socket.fromEvent('updated')
     .pipe(takeUntilDestroyed())
     .subscribe((strdata: string) => {
       const data: Download = JSON.parse(strdata);
-      const dl: Download | undefined  = this.queue.get(data.url);
+      const key = this.getDownloadKey(data);
+      const dl: Download | undefined  = this.queue.get(key);
       data.checked = !!dl?.checked;
       data.deleting = !!dl?.deleting;
-      this.queue.set(data.url, data);
+      this.queue.set(key, data);
       this.updated.next();
     });
     this.socket.fromEvent('completed')
     .pipe(takeUntilDestroyed())
     .subscribe((strdata: string) => {
       const data: Download = JSON.parse(strdata);
-      this.queue.delete(data.url);
-      this.done.set(data.url, data);
+      const key = this.getDownloadKey(data);
+      this.queue.delete(key);
+      this.done.set(key, data);
       this.queueChanged.next();
       this.doneChanged.next();
     });
