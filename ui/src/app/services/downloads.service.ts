@@ -1,5 +1,5 @@
 import { inject, Injectable } from '@angular/core';
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { of, Subject } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { MeTubeSocket } from './metube-socket.service';
@@ -44,6 +44,11 @@ export class DownloadsService {
   configuration: Record<string, unknown> = {};
   customDirs: Record<string, string[]> = {};
 
+  private getDownloadKey(download: Download): string {
+    const maybeKey = (download as Download & { key?: string }).key;
+    return maybeKey && maybeKey.length > 0 ? maybeKey : download.url;
+  }
+
   constructor() {
     this.socket.fromEvent('all')
     .pipe(takeUntilDestroyed())
@@ -61,25 +66,28 @@ export class DownloadsService {
     .pipe(takeUntilDestroyed())
     .subscribe((strdata: string) => {
       const data: Download = JSON.parse(strdata);
-      this.queue.set(data.url, data);
+      const key = this.getDownloadKey(data);
+      this.queue.set(key, data);
       this.queueChanged.next();
     });
     this.socket.fromEvent('updated')
     .pipe(takeUntilDestroyed())
     .subscribe((strdata: string) => {
       const data: Download = JSON.parse(strdata);
-      const dl: Download | undefined  = this.queue.get(data.url);
+      const key = this.getDownloadKey(data);
+      const dl: Download | undefined  = this.queue.get(key);
       data.checked = !!dl?.checked;
       data.deleting = !!dl?.deleting;
-      this.queue.set(data.url, data);
+      this.queue.set(key, data);
       this.updated.next();
     });
     this.socket.fromEvent('completed')
     .pipe(takeUntilDestroyed())
     .subscribe((strdata: string) => {
       const data: Download = JSON.parse(strdata);
-      this.queue.delete(data.url);
-      this.done.set(data.url, data);
+      const key = this.getDownloadKey(data);
+      this.queue.delete(key);
+      this.done.set(key, data);
       this.queueChanged.next();
       this.doneChanged.next();
     });
@@ -127,7 +135,7 @@ export class DownloadsService {
       : (typeof error.error === 'string'
           ? error.error
           : (error.error?.msg || error.message || 'Request failed'));
-    return of({ status: 'error', msg });
+    return of<Status>({ status: 'error', msg });
   }
 
   public add(payload: AddDownloadPayload) {
@@ -152,8 +160,10 @@ export class DownloadsService {
     const ce = payload.clipEnd?.trim();
     if (cs) body['clip_start'] = cs;
     if (ce) body['clip_end'] = ce;
-    return this.http.post<Status>('add', body).pipe(
-      catchError(this.handleHTTPError)
+    const visitId = typeof this.socket.getVisitId === 'function' ? this.socket.getVisitId() : '';
+    const headers = visitId ? new HttpHeaders({ 'X-Visit-Id': visitId }) : undefined;
+    return this.http.post<Status>('add', body, { headers }).pipe(
+      catchError((error: HttpErrorResponse) => this.handleHTTPError(error))
     );
   }
 

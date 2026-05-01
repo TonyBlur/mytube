@@ -1,0 +1,47 @@
+name: Upstream Sync
+
+permissions:
+  contents: write
+  issues: write
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync_latest_from_upstream:
+    name: Sync latest commits from upstream repo
+    runs-on: ubuntu-latest
+    if: ${{ github.event.repository.fork }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clean issue notice
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: close-issues
+          labels: "🚨 Sync Fail"
+
+      - name: Sync upstream changes
+        id: sync
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4
+        with:
+          upstream_sync_repo: alexta69/metube
+          upstream_sync_branch: master
+          target_sync_branch: master
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
+          test_mode: false
+
+      - name: Sync check
+        if: failure()
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: create-issue
+          title: "🚨 同步失败 | Sync Fail"
+          labels: "🚨 Sync Fail"
+          body: |
+            Due to conflicts or workflow changes in the [alexta69/metube](https://github.com/alexta69/metube) upstream repository, the automatic sync has failed. Please manually sync your fork and resolve any conflicts.
+
+            由于上游仓库 [alexta69/metube](https://github.com/alexta69/metube) 存在冲突或 workflow 变更，自动同步失败。请手动 Sync Fork 并解决冲突。

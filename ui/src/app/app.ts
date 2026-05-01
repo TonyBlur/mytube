@@ -1,7 +1,7 @@
 import { AsyncPipe, DatePipe, KeyValuePipe, NgTemplateOutlet } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, ElementRef, viewChild, inject, OnDestroy, OnInit } from '@angular/core';
-import { Observable, Subject, Subscription, from, map, distinctUntilChanged, finalize, mergeMap, takeUntil, tap } from 'rxjs';
+import { Observable, Subject, Subscription, from, map, distinctUntilChanged, finalize, mergeMap, takeUntil, tap, concatMap, toArray } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FontAwesomeModule } from '@fortawesome/angular-fontawesome';
@@ -373,6 +373,10 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
 
   allowYtdlOptionsOverrides() {
     return this.downloads.configuration['ALLOW_YTDL_OPTIONS_OVERRIDES'] === true;
+  }
+
+  isPublicMode() {
+    return this.downloads.configuration['PUBLIC_MODE'] === true;
   }
 
   allowCustomDir(tag: string) {
@@ -1059,6 +1063,11 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
 
   addDownload(overrides: Partial<AddDownloadPayload> = {}) {
     const payload = this.buildAddPayload(overrides);
+    const urls = this.parseInputUrls(payload.url);
+    if (!urls.length) {
+      alert('Please enter at least one URL');
+      return;
+    }
 
     // Validate chapter template if chapter splitting is enabled
     if (payload.splitByChapters && !payload.chapterTemplate.includes('%(section_number)')) {
@@ -1073,14 +1082,25 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
     this.addInProgress = true;
     this.cancelRequested = false;
     this.addRequestSub?.unsubscribe();
-    this.addRequestSub = this.downloads.add(payload).subscribe((status: Status) => {
-      if (status.status === 'error' && !this.cancelRequested) {
-        alert(`Error adding URL: ${status.msg}`);
-      } else if (status.status !== 'error') {
+    this.addRequestSub = from(urls).pipe(
+      concatMap(url => this.downloads.add({ ...payload, url })),
+      toArray(),
+    ).subscribe((statuses: Status[]) => {
+      const failed = statuses.find(s => s.status === 'error');
+      if (failed && !this.cancelRequested) {
+        alert(`Error adding URL: ${failed.msg}`);
+      } else if (!failed) {
         this.addUrl = '';
       }
       this.resetAddState();
     });
+  }
+
+  private parseInputUrls(raw: string): string[] {
+    return (raw || '')
+      .split(/[\s,\n\r]+/)
+      .map(url => url.trim())
+      .filter(url => url.length > 0);
   }
 
   cancelAdding() {

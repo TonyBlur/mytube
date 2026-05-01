@@ -447,6 +447,22 @@ class Download:
                         for subtitle in requested_subtitles.values():
                             if isinstance(subtitle, dict) and subtitle.get('filepath'):
                                 self.status_queue.put({'subtitle_file': subtitle['filepath']})
+                    elif getattr(self.info, 'download_type', '') == 'thumbnail':
+                        info_dict = d.get('info_dict', {}) or {}
+                        image_exts = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')
+
+                        def enqueue_if_image(path: str | None):
+                            if isinstance(path, str) and path.lower().endswith(image_exts):
+                                self.status_queue.put({'thumbnail_file': path})
+
+                        # Common yt-dlp structures where thumbnail paths may appear.
+                        enqueue_if_image(info_dict.get('thumbnail'))
+                        for thumb in (info_dict.get('thumbnails') or []):
+                            if isinstance(thumb, dict):
+                                enqueue_if_image(thumb.get('filepath') or thumb.get('filename') or thumb.get('url'))
+                        for item in (info_dict.get('requested_downloads') or []):
+                            if isinstance(item, dict):
+                                enqueue_if_image(item.get('filepath') or item.get('filename'))
 
                 # Capture all chapter files when SplitChapters finishes
                 elif d.get('postprocessor') == 'SplitChapters' and d.get('status') == 'finished':
@@ -565,10 +581,11 @@ class Download:
                     allowed_caption_exts = ('.txt',) if requested_subtitle_format == 'txt' else ('.vtt', '.srt', '.sbv', '.scc', '.ttml', '.dfxp')
                     if not rel_name.lower().endswith(allowed_caption_exts):
                         continue
+                if getattr(self.info, 'download_type', '') == 'thumbnail':
+                    if not rel_name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')):
+                        continue
                 self.info.filename = rel_name
                 self.info.size = os.path.getsize(fileName) if os.path.exists(fileName) else None
-                if getattr(self.info, 'download_type', '') == 'thumbnail':
-                    self.info.filename = re.sub(r'\.webm$', '.jpg', self.info.filename)
 
             # Handle chapter files
             log.debug(f"Update status for {self.info.title}: {status}")
@@ -613,7 +630,13 @@ class Download:
                     str(getattr(self.info, 'format', '')).lower() == 'txt'
                 ):
                     self.info.filename = rel_path
-                    self.info.size = file_size
+
+            if 'thumbnail_file' in status:
+                thumbnail_file = status.get('thumbnail_file')
+                if thumbnail_file and os.path.isfile(thumbnail_file):
+                    rel_path = os.path.relpath(thumbnail_file, self.download_dir)
+                    self.info.filename = rel_path
+                    self.info.size = os.path.getsize(thumbnail_file)
                 continue
 
             self.info.status = status['status']
@@ -643,13 +666,24 @@ class PersistentQueue:
             self.dict[k] = Download(None, None, None, None, getattr(v, 'quality', 'best'), getattr(v, 'format', 'any'), {}, v)
 
     def exists(self, key):
-        return key in self.dict
+        return self._resolve_key(key) is not None
 
     def get(self, key):
-        return self.dict[key]
+        resolved = self._resolve_key(key)
+        if resolved is None:
+            raise KeyError(key)
+        return self.dict[resolved]
 
     def items(self):
         return self.dict.items()
+
+    def _resolve_key(self, key):
+        if key in self.dict:
+            return key
+        for existing_key, download in self.dict.items():
+            if getattr(download.info, "url", None) == key:
+                return existing_key
+        return None
 
     def saved_items(self):
         items = [
@@ -716,7 +750,7 @@ class PersistentQueue:
         return items
 
     def put(self, value):
-        key = value.info.url
+        key = getattr(value.info, "key", value.info.url)
         old = self.dict.get(key)
         self.dict[key] = value
         try:
@@ -729,13 +763,14 @@ class PersistentQueue:
             raise
 
     def delete(self, key):
-        if key in self.dict:
-            old = self.dict[key]
-            del self.dict[key]
+        resolved = self._resolve_key(key)
+        if resolved is not None:
+            old = self.dict[resolved]
+            del self.dict[resolved]
             try:
                 self._save_dict()
             except Exception:
-                self.dict[key] = old
+                self.dict[resolved] = old
                 raise
 
     def next(self):
@@ -757,6 +792,25 @@ class DownloadQueue:
         self.done.load()
         self._add_generation = 0
         self._canceled_urls = set()  # URLs canceled during current playlist add
+
+    @staticmethod
+    def _download_key(dl: DownloadInfo) -> str:
+        return "|".join([
+            dl.url,
+            dl.download_type,
+            dl.codec,
+            dl.format,
+            dl.quality,
+            dl.folder or "",
+            dl.custom_name_prefix or "",
+            str(dl.playlist_item_limit or 0),
+            "1" if dl.split_by_chapters else "0",
+            dl.chapter_template or "",
+            dl.subtitle_language or "",
+            dl.subtitle_mode or "",
+            str(dl.clip_start if dl.clip_start is not None else ""),
+            str(dl.clip_end if dl.clip_end is not None else ""),
+        ])
 
     def cancel_add(self):
         self._add_generation += 1
@@ -795,10 +849,11 @@ class DownloadQueue:
                     pass
             download.info.status = 'error'
         download.close()
-        if self.queue.exists(download.info.url):
-            self.queue.delete(download.info.url)
+        key = getattr(download.info, 'key', download.info.url)
+        if self.queue.exists(key):
+            self.queue.delete(key)
             if download.canceled:
-                asyncio.create_task(self.notifier.canceled(download.info.url))
+                asyncio.create_task(self.notifier.canceled(key))
             else:
                 self.done.put(download)
                 asyncio.create_task(self.notifier.completed(download.info))
@@ -808,14 +863,14 @@ class DownloadQueue:
                     log.error(f'CLEAR_COMPLETED_AFTER is set to an invalid value "{self.config.CLEAR_COMPLETED_AFTER}", expected an integer number of seconds')
                     clear_after = 0
                 if clear_after > 0:
-                    task = asyncio.create_task(self.__auto_clear_after_delay(download.info.url, clear_after))
+                    task = asyncio.create_task(self.__auto_clear_after_delay(key, clear_after))
                     task.add_done_callback(lambda t: log.error(f'Auto-clear task failed: {t.exception()}') if not t.cancelled() and t.exception() else None)
 
-    async def __auto_clear_after_delay(self, url, delay_seconds):
+    async def __auto_clear_after_delay(self, key, delay_seconds):
         await asyncio.sleep(delay_seconds)
-        if self.done.exists(url):
-            log.debug(f'Auto-clearing completed download: {url}')
-            await self.clear([url])
+        if self.done.exists(key):
+            log.debug(f'Auto-clearing completed download: {key}')
+            await self.clear([key])
 
     def _build_ytdl_options(self, ytdl_options_presets=None, ytdl_options_overrides=None):
         """Merge global options, presets (in order), and per-download overrides."""
@@ -1014,29 +1069,30 @@ class DownloadQueue:
             if key in self._canceled_urls:
                 log.info(f'Skipping canceled URL: {entry.get("title") or key}')
                 return {'status': 'ok'}
-            if not self.queue.exists(key):
-                dl = DownloadInfo(
-                    id=entry['id'],
-                    title=entry.get('title') or entry['id'],
-                    url=key,
-                    quality=quality,
-                    download_type=download_type,
-                    codec=codec,
-                    format=format,
-                    folder=folder,
-                    custom_name_prefix=custom_name_prefix,
-                    error=error,
-                    entry=entry,
-                    playlist_item_limit=playlist_item_limit,
-                    split_by_chapters=split_by_chapters,
-                    chapter_template=chapter_template,
-                    subtitle_language=subtitle_language,
-                    subtitle_mode=subtitle_mode,
-                    ytdl_options_presets=ytdl_options_presets,
-                    ytdl_options_overrides=ytdl_options_overrides,
-                    clip_start=clip_start,
-                    clip_end=clip_end,
-                )
+            dl = DownloadInfo(
+                id=entry['id'],
+                title=entry.get('title') or entry['id'],
+                url=key,
+                quality=quality,
+                download_type=download_type,
+                codec=codec,
+                format=format,
+                folder=folder,
+                custom_name_prefix=custom_name_prefix,
+                error=error,
+                entry=entry,
+                playlist_item_limit=playlist_item_limit,
+                split_by_chapters=split_by_chapters,
+                chapter_template=chapter_template,
+                subtitle_language=subtitle_language,
+                subtitle_mode=subtitle_mode,
+                ytdl_options_presets=ytdl_options_presets,
+                ytdl_options_overrides=ytdl_options_overrides,
+                clip_start=clip_start,
+                clip_end=clip_end,
+            )
+            dl.key = self._download_key(dl)
+            if not self.queue.exists(dl.key):
                 await self.__add_download(dl, auto_start)
             return {'status': 'ok'}
         return {'status': 'error', 'msg': f'Unsupported resource "{etype}"'}
