@@ -1,5 +1,21 @@
 #!/bin/sh
 
+load_env_file() {
+    env_file="$1"
+    if [ -f "$env_file" ]; then
+        echo "Loading environment from ${env_file}"
+        # shellcheck disable=SC1090
+        set -a
+        . "$env_file"
+        set +a
+    fi
+}
+
+load_env_file "/app/.env"
+if [ -n "${ENV_FILE}" ]; then
+    load_env_file "${ENV_FILE}"
+fi
+
 PUID="${UID:-$PUID}"
 PGID="${GID:-$PGID}"
 

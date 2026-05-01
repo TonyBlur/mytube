@@ -1,30 +1,33 @@
-# MeTube
+## Fork note
+This project is forked from [alexta69/metube](https://github.com/alexta69/metube).
 
-![Build Status](https://github.com/alexta69/metube/actions/workflows/main.yml/badge.svg)
-![Docker Pulls](https://img.shields.io/docker/pulls/alexta69/metube.svg)
+# MyTube
 
-MeTube is a self-hosted web UI for `yt-dlp`, for downloading media from YouTube and [dozens of other sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
+![Build Status](https://github.com/TonyBlur/mytube/actions/workflows/main.yml/badge.svg)
+![Docker Pulls](https://img.shields.io/docker/pulls/tonyblur/mytube.svg)
+
+MyTube is a self-hosted web UI for `yt-dlp`, for downloading media from YouTube and [dozens of other sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
 
 Key capabilities:
 * Download videos, audio, captions, and thumbnails from a browser UI.
 * Download playlists and channels, with configurable output and download options.
 * Subscribe to channels and playlists, periodically check for new items, and queue new uploads automatically.
 
-![screenshot1](https://github.com/alexta69/metube/raw/master/screenshot.gif)
+![screenshot1](https://github.com/TonyBlur/mytube/raw/master/screenshot.gif)
 
 ## 🐳 Run using Docker
 
 ```bash
-docker run -d -p 8081:8081 -v /path/to/downloads:/downloads ghcr.io/alexta69/metube
+docker run -d -p 8081:8081 -v /path/to/downloads:/downloads ghcr.io/tonyblur/mytube
 ```
 
 ## 🐳 Run using docker-compose
 
 ```yaml
 services:
-  metube:
-    image: ghcr.io/alexta69/metube
-    container_name: metube
+  mytube:
+    image: ghcr.io/tonyblur/mytube
+    container_name: mytube
     restart: unless-stopped
     ports:
       - "8081:8081"
@@ -35,6 +38,10 @@ services:
 ## ⚙️ Configuration via environment variables
 
 Certain values can be set via environment variables, using the `-e` parameter on the docker command line, or the `environment:` section in docker-compose.
+
+You can also load variables from files:
+* Docker CLI supports `--env-file /path/to/.env`.
+* The container entrypoint auto-loads `/app/.env` if present, and also loads a custom file when `ENV_FILE` points to it.
 
 ### ⬇️ Download Behavior
 
@@ -54,11 +61,11 @@ Certain values can be set via environment variables, using the `-e` parameter on
 * __CREATE_CUSTOM_DIRS__: Whether to support automatically creating directories within the __DOWNLOAD_DIR__ (or __AUDIO_DOWNLOAD_DIR__) if they do not exist. When enabled, the download directory selector supports free-text input, and the specified directory will be created recursively. Defaults to `true`.
 * __CUSTOM_DIRS_EXCLUDE_REGEX__: Regular expression to exclude some custom directories from the dropdown. Empty regex disables exclusion. Defaults to `(^|/)[.@].*$`, which means directories starting with `.` or `@`.
 * __DOWNLOAD_DIRS_INDEXABLE__: If `true`, the download directories (__DOWNLOAD_DIR__ and __AUDIO_DOWNLOAD_DIR__) are indexable on the web server. Defaults to `false`.
-* __STATE_DIR__: Path to where MeTube will store its persistent state files (`queue.json`, `pending.json`, `completed.json`, `subscriptions.json`). Defaults to `/downloads/.metube` in the Docker image, and `.` otherwise.
+* __STATE_DIR__: Path to where mytube will store its persistent state files (`queue.json`, `pending.json`, `completed.json`, `subscriptions.json`). Defaults to `/downloads/.mytube` in the Docker image, and `.` otherwise.
 * __TEMP_DIR__: Path where intermediary download files will be saved. Defaults to `/downloads` in the Docker image, and `.` otherwise.
   * Set this to an SSD or RAM filesystem (e.g., `tmpfs`) for better performance.
   * __Note__: Using a RAM filesystem may prevent downloads from being resumed.
-* __CHOWN_DIRS__: If `false`, ownership of `DOWNLOAD_DIR`, `STATE_DIR`, and `TEMP_DIR` (and their contents) will not be set on container start. Ensure user under which MeTube runs has necessary access to these directories already. Defaults to `true`.
+* __CHOWN_DIRS__: If `false`, ownership of `DOWNLOAD_DIR`, `STATE_DIR`, and `TEMP_DIR` (and their contents) will not be set on container start. Ensure user under which mytube runs has necessary access to these directories already. Defaults to `true`.
 
 ### 📝 File Naming & yt-dlp
 
@@ -77,26 +84,26 @@ Certain values can be set via environment variables, using the `-e` parameter on
 * __HOST__: The host address the web server will bind to. Defaults to `0.0.0.0` (all interfaces).
 * __PORT__: The port number the web server will listen on. Defaults to `8081`.
 * __URL_PREFIX__: Base path for the web server (for use when hosting behind a reverse proxy). Defaults to `/`.
-* __PUBLIC_HOST_URL__: Base URL for the download links shown in the UI for completed files. By default, MeTube serves them under its own URL. If your download directory is accessible on another URL and you want the download links to be based there, use this variable to set it.
+* __PUBLIC_HOST_URL__: Base URL for the download links shown in the UI for completed files. By default, mytube serves them under its own URL. If your download directory is accessible on another URL and you want the download links to be based there, use this variable to set it.
 * __PUBLIC_HOST_AUDIO_URL__: Same as PUBLIC_HOST_URL but for audio downloads.
 * __HTTPS__: Use `https` instead of `http` (__CERTFILE__ and __KEYFILE__ required). Defaults to `false`.
 * __CERTFILE__: HTTPS certificate file path.
 * __KEYFILE__: HTTPS key file path.
-* __CORS_ALLOWED_ORIGINS__: Comma-separated list of origins permitted to make cross-origin requests to the MeTube API. When unset or empty, all cross-origin requests are denied. Set to `*` to allow all origins. This must be configured for [browser extensions](#-browser-extensions), [bookmarklets](#-bookmarklet), and any other browser-based tools that contact MeTube from a different origin. For browser extensions use `*` (see below); for bookmarklets you can list specific sites, e.g. `https://www.youtube.com,https://www.vimeo.com`.
+* __CORS_ALLOWED_ORIGINS__: Comma-separated list of origins permitted to make cross-origin requests to the mytube API. When unset or empty, all cross-origin requests are denied. Set to `*` to allow all origins. This must be configured for [browser extensions](#-browser-extensions), [bookmarklets](#-bookmarklet), and any other browser-based tools that contact mytube from a different origin. For browser extensions use `*` (see below); for bookmarklets you can list specific sites, e.g. `https://www.youtube.com,https://www.vimeo.com`.
 * __ROBOTS_TXT__: A path to a `robots.txt` file mounted in the container.
 
 ### 🏠 Basic Setup
 
-* __PUID__: User under which MeTube will run. Defaults to `1000` (legacy `UID` also supported).
-* __PGID__: Group under which MeTube will run. Defaults to `1000` (legacy `GID` also supported).
-* __UMASK__: Umask value used by MeTube. Defaults to `022`.
+* __PUID__: User under which mytube will run. Defaults to `1000` (legacy `UID` also supported).
+* __PGID__: Group under which mytube will run. Defaults to `1000` (legacy `GID` also supported).
+* __UMASK__: Umask value used by mytube. Defaults to `022`.
 * __DEFAULT_THEME__: Default theme to use for the UI, can be set to `light`, `dark`, or `auto`. Defaults to `auto`.
 * __LOGLEVEL__: Log level, can be set to `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, or `NONE`. Defaults to `INFO`. 
 * __ENABLE_ACCESSLOG__: Whether to enable access log. Defaults to `false`.
 
 ## 🎛️ Configuring yt-dlp options
 
-MeTube lets you customize how [yt-dlp](https://github.com/yt-dlp/yt-dlp) behaves at three levels, from broadest to most specific:
+MyTube lets you customize how [yt-dlp](https://github.com/yt-dlp/yt-dlp) behaves at three levels, from broadest to most specific:
 
 1. **Global options** — apply to every download by default.
 2. **Presets** — named bundles of options that users can pick per download from the UI.
@@ -108,7 +115,7 @@ In JSON presets and overrides, setting an option to **`null`** clears that optio
 
 ### Option format
 
-yt-dlp options in MeTube are expressed as JSON objects. The keys are yt-dlp API option names, which roughly correspond to command-line flags with dashes replaced by underscores. For example, the command-line flag `--write-subs` becomes `"writesubtitles": true` in JSON.
+yt-dlp options in MyTube are expressed as JSON objects. The keys are yt-dlp API option names, which roughly correspond to command-line flags with dashes replaced by underscores. For example, the command-line flag `--write-subs` becomes `"writesubtitles": true` in JSON.
 
 > **Tip:** Some command-line flags don't have a direct single-key equivalent — for instance, `--embed-thumbnail` and `--recode-video` must be expressed via `"postprocessors"`. A full list of available API options can be found [in the yt-dlp source](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/YoutubeDL.py#L224), and [this conversion script](https://github.com/yt-dlp/yt-dlp/blob/master/devscripts/cli_to_api.py) can help translate command-line flags to their API equivalents.
 
@@ -187,7 +194,7 @@ When multiple presets are selected for a download, they are applied in order. If
 
 ### Per-download overrides
 
-For one-off tweaks, MeTube can expose a free-text JSON field in the UI ("Custom yt-dlp Options") where users type yt-dlp options that apply only to that single download. This is disabled by default:
+For one-off tweaks, MyTube can expose a free-text JSON field in the UI ("Custom yt-dlp Options") where users type yt-dlp options that apply only to that single download. This is disabled by default:
 
 ```yaml
 environment:
@@ -206,79 +213,79 @@ When a download starts, the final set of yt-dlp options is built in this order:
 2. Apply each selected **preset** in order (later presets overwrite earlier ones for conflicting keys).
 3. Apply any **per-download overrides** on top (overwrite everything else for conflicting keys).
 
-MeTube always forces its own flat-extract behaviour during the initial metadata fetch (`extract_flat`, `noplaylist`, etc.); presets cannot override those keys for that phase.
+MyTube always forces its own flat-extract behaviour during the initial metadata fetch (`extract_flat`, `noplaylist`, etc.); presets cannot override those keys for that phase.
 
 **Example:** Suppose your global options set `"writesubtitles": false`, but you select a preset that sets `"writesubtitles": true`. Subtitles will be written for that download because the preset overrides the global setting. If you additionally enter `{"writesubtitles": false}` in the per-download overrides field, that value wins and subtitles will not be written.
 
 ### Configuration cookbooks
 
-The project's Wiki contains examples of useful configurations contributed by users of MeTube:
-* [YTDL_OPTIONS Cookbook](https://github.com/alexta69/metube/wiki/YTDL_OPTIONS-Cookbook)
-* [OUTPUT_TEMPLATE Cookbook](https://github.com/alexta69/metube/wiki/OUTPUT_TEMPLATE-Cookbook)
+The project's Wiki contains examples of useful configurations contributed by users of MyTube:
+* [YTDL_OPTIONS Cookbook](https://github.com/TonyBlur/mytube/wiki/YTDL_OPTIONS-Cookbook)
+* [OUTPUT_TEMPLATE Cookbook](https://github.com/TonyBlur/mytube/wiki/OUTPUT_TEMPLATE-Cookbook)
 
 ## 🍪 Using browser cookies
 
-In case you need to use your browser's cookies with MeTube, for example to download restricted or private videos:
+In case you need to use your browser's cookies with MyTube, for example to download restricted or private videos:
 
 * Install in your browser an extension to extract cookies:
   * [Firefox](https://addons.mozilla.org/en-US/firefox/addon/export-cookies-txt/)
   * [Chrome](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
 * Extract the cookies you need with the extension and save/export them as `cookies.txt`.
-* In MeTube, open **Advanced Options** and use the **Upload Cookies** button to upload the file.
+* In MyTube, open **Advanced Options** and use the **Upload Cookies** button to upload the file.
 * After upload, the cookie indicator should show as active.
 * Use **Delete Cookies** in the same section to remove uploaded cookies.
 
 ## 🔌 Browser extensions
 
-Browser extensions allow right-clicking videos and sending them directly to MeTube. If you're on an HTTPS page, your MeTube instance must be behind an HTTPS reverse proxy (see below) for extensions to work.
+Browser extensions allow right-clicking videos and sending them directly to MyTube. If you're on an HTTPS page, your MyTube instance must be behind an HTTPS reverse proxy (see below) for extensions to work.
 
 Since browser extensions make requests from their own origin (`chrome-extension://...` or `moz-extension://...`), you must set `CORS_ALLOWED_ORIGINS=*` for them to work.
 
-__Chrome:__ contributed by [Rpsl](https://github.com/rpsl). You can install it from [Google Chrome Webstore](https://chrome.google.com/webstore/detail/metube-downloader/fbmkmdnlhacefjljljlbhkodfmfkijdh) or use developer mode and install [from sources](https://github.com/Rpsl/metube-browser-extension).
+__Chrome:__ contributed by [Rpsl](https://github.com/rpsl). You can install it from [Google Chrome Webstore](https://chrome.google.com/webstore/detail/mytube-downloader/fbmkmdnlhacefjljljlbhkodfmfkijdh) or use developer mode and install [from sources](https://github.com/Rpsl/mytube-browser-extension).
 
-__Firefox:__ contributed by [nanocortex](https://github.com/nanocortex). You can install it from [Firefox Addons](https://addons.mozilla.org/en-US/firefox/addon/metube-downloader) or get sources from [here](https://github.com/nanocortex/metube-firefox-addon).
+__Firefox:__ contributed by [nanocortex](https://github.com/nanocortex). You can install it from [Firefox Addons](https://addons.mozilla.org/en-US/firefox/addon/mytube-downloader) or get sources from [here](https://github.com/nanocortex/mytube-firefox-addon).
 
 ## 📱 iOS Shortcut
 
-[rithask](https://github.com/rithask) created an iOS shortcut to send URLs to MeTube from Safari. Enter the MeTube instance address when prompted which will be saved for later use. You can run the shortcut from Safari’s share menu. The shortcut can be downloaded from [this iCloud link](https://www.icloud.com/shortcuts/66627a9f334c467baabdb2769763a1a6).
+[rithask](https://github.com/rithask) created an iOS shortcut to send URLs to MyTube from Safari. Enter the mytube instance address when prompted which will be saved for later use. You can run the shortcut from Safari’s share menu. The shortcut can be downloaded from [this iCloud link](https://www.icloud.com/shortcuts/66627a9f334c467baabdb2769763a1a6).
 
 ## 🔖 Bookmarklet
 
-[kushfest](https://github.com/kushfest) has created a Chrome bookmarklet for sending the currently open webpage to MeTube. Please note that if you're on an HTTPS page, your MeTube instance must be configured with `HTTPS` as `true` in the environment, or be behind an HTTPS reverse proxy (see below) for the bookmarklet to work.
+[kushfest](https://github.com/kushfest) has created a Chrome bookmarklet for sending the currently open webpage to mytube. Please note that if you're on an HTTPS page, your MyTube instance must be configured with `HTTPS` as `true` in the environment, or be behind an HTTPS reverse proxy (see below) for the bookmarklet to work.
 
-Since bookmarklets run in the context of the current page (e.g. youtube.com), the requests they make to MeTube are cross-origin. You must add the origins of sites where you use the bookmarklet to the __CORS_ALLOWED_ORIGINS__ environment variable, otherwise the browser will block the requests. For example, to use the bookmarklet on YouTube and Vimeo: `CORS_ALLOWED_ORIGINS=https://www.youtube.com,https://www.vimeo.com`.
+Since bookmarklets run in the context of the current page (e.g. youtube.com), the requests they make to mytube are cross-origin. You must add the origins of sites where you use the bookmarklet to the __CORS_ALLOWED_ORIGINS__ environment variable, otherwise the browser will block the requests. For example, to use the bookmarklet on YouTube and Vimeo: `CORS_ALLOWED_ORIGINS=https://www.youtube.com,https://www.vimeo.com`.
 
-GitHub doesn't allow embedding JavaScript as a link, so the bookmarklet has to be created manually by copying the following code to a new bookmark you create on your bookmarks bar. Change the hostname in the URL below to point to your MeTube instance.
+GitHub doesn't allow embedding JavaScript as a link, so the bookmarklet has to be created manually by copying the following code to a new bookmark you create on your bookmarks bar. Change the hostname in the URL below to point to your MyTube instance.
 
 ```javascript
-javascript:!function(){xhr=new XMLHttpRequest();xhr.open("POST","https://metube.domain.com/add");xhr.withCredentials=true;xhr.send(JSON.stringify({"url":document.location.href,"quality":"best"}));xhr.onload=function(){if(xhr.status==200){alert("Sent to metube!")}else{alert("Send to metube failed. Check the javascript console for clues.")}}}();
+javascript:!function(){xhr=new XMLHttpRequest();xhr.open("POST","https://mytube.domain.com/add");xhr.withCredentials=true;xhr.send(JSON.stringify({"url":document.location.href,"quality":"best"}));xhr.onload=function(){if(xhr.status==200){alert("Sent to mytube!")}else{alert("Send to mytube failed. Check the javascript console for clues.")}}}();
 ```
 
 [shoonya75](https://github.com/shoonya75) has contributed a Firefox version:
 
 ```javascript
-javascript:(function(){xhr=new XMLHttpRequest();xhr.open("POST","https://metube.domain.com/add");xhr.send(JSON.stringify({"url":document.location.href,"quality":"best"}));xhr.onload=function(){if(xhr.status==200){alert("Sent to metube!")}else{alert("Send to metube failed. Check the javascript console for clues.")}}})();
+javascript:(function(){xhr=new XMLHttpRequest();xhr.open("POST","https://mytube.domain.com/add");xhr.send(JSON.stringify({"url":document.location.href,"quality":"best"}));xhr.onload=function(){if(xhr.status==200){alert("Sent to mytube!")}else{alert("Send to mytube failed. Check the javascript console for clues.")}}})();
 ```
 
 The above bookmarklets use `alert()` for notifications. This variant shows a toast instead (Chrome — for Firefox, replace the `!function(){...}()` wrapper with `(function(){...})()`):
 
 ```javascript
-javascript:!function(){function notify(msg) {var sc = document.scrollingElement.scrollTop; var text = document.createElement('span');text.innerHTML=msg;var ts = text.style;ts.all = 'revert';ts.color = '#000';ts.fontFamily = 'Verdana, sans-serif';ts.fontSize = '15px';ts.backgroundColor = 'white';ts.padding = '15px';ts.border = '1px solid gainsboro';ts.boxShadow = '3px 3px 10px';ts.zIndex = '100';document.body.appendChild(text);ts.position = 'absolute'; ts.top = 50 + sc + 'px'; ts.left = (window.innerWidth / 2)-(text.offsetWidth / 2) + 'px'; setTimeout(function () { text.style.visibility = "hidden"; }, 1500);}xhr=new XMLHttpRequest();xhr.open("POST","https://metube.domain.com/add");xhr.send(JSON.stringify({"url":document.location.href,"quality":"best"}));xhr.onload=function() { if(xhr.status==200){notify("Sent to metube!")}else {notify("Send to metube failed. Check the javascript console for clues.")}}}();
+javascript:!function(){function notify(msg) {var sc = document.scrollingElement.scrollTop; var text = document.createElement('span');text.innerHTML=msg;var ts = text.style;ts.all = 'revert';ts.color = '#000';ts.fontFamily = 'Verdana, sans-serif';ts.fontSize = '15px';ts.backgroundColor = 'white';ts.padding = '15px';ts.border = '1px solid gainsboro';ts.boxShadow = '3px 3px 10px';ts.zIndex = '100';document.body.appendChild(text);ts.position = 'absolute'; ts.top = 50 + sc + 'px'; ts.left = (window.innerWidth / 2)-(text.offsetWidth / 2) + 'px'; setTimeout(function () { text.style.visibility = "hidden"; }, 1500);}xhr=new XMLHttpRequest();xhr.open("POST","https://mytube.domain.com/add");xhr.send(JSON.stringify({"url":document.location.href,"quality":"best"}));xhr.onload=function() { if(xhr.status==200){notify("Sent to mytube!")}else {notify("Send to mytube failed. Check the javascript console for clues.")}}}();
 ```
 
 ## ⚡ Raycast extension
 
-[dotvhs](https://github.com/dotvhs) has created an [extension for Raycast](https://www.raycast.com/dot/metube) for adding videos to MeTube directly from Raycast.
+[dotvhs](https://github.com/dotvhs) has created an [extension for Raycast](https://www.raycast.com/dot/mytube) for adding videos to MyTube directly from Raycast.
 
 ## 🔒 HTTPS support, and running behind a reverse proxy
 
-It's possible to configure MeTube to listen in HTTPS mode. `docker-compose` example:
+It's possible to configure MyTube to listen in HTTPS mode. `docker-compose` example:
 
 ```yaml
 services:
-  metube:
-    image: ghcr.io/alexta69/metube
-    container_name: metube
+  mytube:
+    image: ghcr.io/tonyblur/mytube
+    container_name: mytube
     restart: unless-stopped
     ports:
       - "8081:8081"
@@ -292,15 +299,15 @@ services:
       - KEYFILE=/ssl/key.pem
 ```
 
-MeTube can also run behind a reverse proxy for HTTPS termination or authentication. When serving under a subdirectory, set `URL_PREFIX` accordingly.
+MyTube can also run behind a reverse proxy for HTTPS termination or authentication. When serving under a subdirectory, set `URL_PREFIX` accordingly.
 
-The [linuxserver/swag](https://docs.linuxserver.io/general/swag) image includes ready-made snippets for MeTube in [subfolder](https://github.com/linuxserver/reverse-proxy-confs/blob/master/metube.subfolder.conf.sample) and [subdomain](https://github.com/linuxserver/reverse-proxy-confs/blob/master/metube.subdomain.conf.sample) modes, plus Authelia for authentication.
+The [linuxserver/swag](https://docs.linuxserver.io/general/swag) image includes ready-made snippets for mytube in [subfolder](https://github.com/linuxserver/reverse-proxy-confs/blob/master/mytube.subfolder.conf.sample) and [subdomain](https://github.com/linuxserver/reverse-proxy-confs/blob/master/mytube.subdomain.conf.sample) modes, plus Authelia for authentication.
 
 ### 🌐 NGINX
 
 ```nginx
-location /metube/ {
-        proxy_pass http://metube:8081;
+location /mytube/ {
+        proxy_pass http://mytube:8081;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -316,13 +323,13 @@ Contributed by [PIE-yt](https://github.com/PIE-yt). Source [here](https://gist.g
 
 ```apache
 # For putting in your Apache sites site.conf
-# Serves MeTube under a /metube/ subdir (http://yourdomain.com/metube/)
-<Location /metube/>
+# Serves mytube under a /mytube/ subdir (http://yourdomain.com/mytube/)
+<Location /mytube/>
     ProxyPass http://localhost:8081/ retry=0 timeout=30
     ProxyPassReverse http://localhost:8081/
 </Location>
 
-<Location /metube/socket.io>
+<Location /mytube/socket.io>
     RewriteEngine On
     RewriteCond %{QUERY_STRING} transport=websocket    [NC]
     RewriteRule /(.*) ws://localhost:8081/socket.io/$1 [P,L]
@@ -337,29 +344,29 @@ The following example Caddyfile gets a reverse proxy going behind [caddy](https:
 
 ```caddyfile
 example.com {
-  route /metube/* {
-    uri strip_prefix metube
-    reverse_proxy metube:8081
+  route /mytube/* {
+    uri strip_prefix mytube
+    reverse_proxy mytube:8081
   }
 }
 ```
 
 ## 🔄 Updating yt-dlp
 
-MeTube is powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp), which requires frequent updates as video sites change their layouts. A nightly build automatically publishes a new Docker image whenever a new yt-dlp version is available, so keep your container up to date — [watchtower](https://github.com/nicholas-fedor/watchtower) works well for this.
+MyTube is powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp), which requires frequent updates as video sites change their layouts. A nightly build automatically publishes a new Docker image whenever a new yt-dlp version is available, so keep your container up to date — [watchtower](https://github.com/nicholas-fedor/watchtower) works well for this.
 
 ## 🔧 Troubleshooting and submitting issues
 
-MeTube is only a UI for [yt-dlp](https://github.com/yt-dlp/yt-dlp). Issues with authentication, postprocessing, permissions, or `YTDL_OPTIONS` should be debugged with yt-dlp directly first — once working, import those options into MeTube. To test inside the container:
+MyTube is only a UI for [yt-dlp](https://github.com/yt-dlp/yt-dlp). Issues with authentication, postprocessing, permissions, or `YTDL_OPTIONS` should be debugged with yt-dlp directly first — once working, import those options into MyTube. To test inside the container:
 
 ```bash
-docker exec -ti metube sh
+docker exec -ti mytube sh
 cd /downloads
 ```
 
 ## 💡 Submitting feature requests
 
-MeTube development relies on community contributions. If you need additional features, please submit a PR. Create an issue first to discuss the implementation — some PRs may not be accepted to reduce bloat. Feature requests without an accompanying PR are unlikely to be fulfilled.
+MyTube development relies on community contributions. If you need additional features, please submit a PR. Create an issue first to discuss the implementation — some PRs may not be accepted to reduce bloat. Feature requests without an accompanying PR are unlikely to be fulfilled.
 
 ## 🛠️ Building and running locally
 
@@ -382,7 +389,7 @@ uv run python3 app/main.py
 A Docker image can be built locally (it will build the UI too):
 
 ```bash
-docker build -t metube .
+docker build -t mytube .
 ```
 
 Note that if you're running the server in VSCode, your downloads will go to your user's Downloads folder (this is configured via the environment in `.vscode/launch.json`).

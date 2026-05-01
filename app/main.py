@@ -73,9 +73,10 @@ class Config:
         'MAX_CONCURRENT_DOWNLOADS': '3',
         'LOGLEVEL': 'INFO',
         'ENABLE_ACCESSLOG': 'false',
+        'PUBLIC_MODE': 'false',
     }
 
-    _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'HTTPS', 'ENABLE_ACCESSLOG', 'ALLOW_YTDL_OPTIONS_OVERRIDES')
+    _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'HTTPS', 'ENABLE_ACCESSLOG', 'ALLOW_YTDL_OPTIONS_OVERRIDES', 'PUBLIC_MODE')
 
     def __init__(self):
         for k, v in self._DEFAULTS.items():
@@ -135,6 +136,7 @@ class Config:
         'DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT',
         'SUBSCRIPTION_DEFAULT_CHECK_INTERVAL',
         'ALLOW_YTDL_OPTIONS_OVERRIDES',
+        'PUBLIC_MODE',
     )
 
     def frontend_safe(self) -> dict:
@@ -443,26 +445,93 @@ def _migrate_legacy_request(post: dict) -> dict:
 
     return post
 
+
+public_visit_downloads: dict[str, set[str]] = {}
+public_download_owner: dict[str, str] = {}
+public_download_owner_by_id: dict[str, str] = {}
+public_download_owner_by_key: dict[str, str] = {}
+public_visit_sids: dict[str, set[str]] = {}
+public_sid_visit: dict[str, str] = {}
+
+
+def _register_public_download(visit_id: str, url: str):
+    if not visit_id or not url:
+        return
+    public_visit_downloads.setdefault(visit_id, set()).add(url)
+    public_download_owner[url] = visit_id
+
+
+def _register_public_download_key(visit_id: str, dl_key: str | None):
+    if not visit_id or not dl_key:
+        return
+    public_download_owner_by_key[dl_key] = visit_id
+
+
+def _forget_public_download(url: str | None = None, *, dl_id: str | None = None, dl_key: str | None = None):
+    visit_id = None
+    if dl_id:
+        visit_id = public_download_owner_by_id.pop(dl_id, None)
+    if visit_id is None and dl_key:
+        visit_id = public_download_owner_by_key.pop(dl_key, None)
+    if visit_id is None and url:
+        visit_id = public_download_owner.pop(url, None)
+    if not visit_id:
+        return
+    urls = public_visit_downloads.get(visit_id)
+    if not urls:
+        return
+    if url:
+        urls.discard(url)
+    if not urls:
+        public_visit_downloads.pop(visit_id, None)
+
+
+async def _emit_download_event(event: str, payload, *, url: str | None = None, dl_id: str | None = None, dl_key: str | None = None):
+    if not config.PUBLIC_MODE:
+        await sio.emit(event, payload)
+        return
+    visit_id = (
+        (public_download_owner_by_id.get(dl_id) if dl_id else None)
+        or (public_download_owner_by_key.get(dl_key) if dl_key else None)
+        or (public_download_owner.get(url) if url else None)
+    )
+    if not visit_id:
+        return
+    for sid in list(public_visit_sids.get(visit_id, set())):
+        await sio.emit(event, payload, to=sid)
+
+
+def _public_visit_from_environ(environ: dict) -> str:
+    qs = parse_qs(environ.get('QUERY_STRING', ''))
+    return (qs.get('visit_id', [''])[0] or '').strip()
+
+
 class Notifier(DownloadQueueNotifier):
     async def added(self, dl):
         log.info(f"Notifier: Download added - {dl.title}")
-        await sio.emit('added', serializer.encode(dl))
+        visit_id = public_download_owner.get(dl.url)
+        if visit_id:
+            public_download_owner_by_id[dl.id] = visit_id
+            _register_public_download_key(visit_id, getattr(dl, 'key', None))
+        await _emit_download_event('added', serializer.encode(dl), url=dl.url, dl_id=dl.id, dl_key=getattr(dl, 'key', None))
 
     async def updated(self, dl):
         log.debug(f"Notifier: Download updated - {dl.title}")
-        await sio.emit('updated', serializer.encode(dl))
+        await _emit_download_event('updated', serializer.encode(dl), url=dl.url, dl_id=dl.id, dl_key=getattr(dl, 'key', None))
 
     async def completed(self, dl):
         log.info(f"Notifier: Download completed - {dl.title}")
-        await sio.emit('completed', serializer.encode(dl))
+        await _emit_download_event('completed', serializer.encode(dl), url=dl.url, dl_id=dl.id, dl_key=getattr(dl, 'key', None))
+        _forget_public_download(dl.url, dl_id=dl.id, dl_key=getattr(dl, 'key', None))
 
     async def canceled(self, id):
         log.info(f"Notifier: Download canceled - {id}")
-        await sio.emit('canceled', serializer.encode(id))
+        await _emit_download_event('canceled', serializer.encode(id), url=id, dl_id=id, dl_key=id)
+        _forget_public_download(id, dl_id=id, dl_key=id)
 
     async def cleared(self, id):
         log.info(f"Notifier: Download cleared - {id}")
-        await sio.emit('cleared', serializer.encode(id))
+        await _emit_download_event('cleared', serializer.encode(id), url=id, dl_id=id)
 
 dqueue = DownloadQueue(config, Notifier())
 app.on_startup.append(lambda app: dqueue.initialize())
@@ -723,6 +792,11 @@ async def add(request):
         bool(o.get('folder')),
         o['auto_start'],
     )
+    if config.PUBLIC_MODE:
+        visit_id = request.headers.get('X-Visit-Id', '').strip()
+        if not visit_id:
+            raise web.HTTPBadRequest(reason='missing X-Visit-Id in public mode')
+        _register_public_download(visit_id, o['url'])
     status = await dqueue.add(
         o['url'],
         o['download_type'],
@@ -760,6 +834,8 @@ async def cancel_add(request):
 
 @routes.post(config.URL_PREFIX + 'subscribe')
 async def subscribe(request):
+    if config.PUBLIC_MODE:
+        raise web.HTTPForbidden(reason='subscriptions are disabled in public mode')
     post = await _read_json_request(request)
     try:
         o = parse_download_options(post)
@@ -811,11 +887,15 @@ async def subscribe(request):
 
 @routes.get(config.URL_PREFIX + 'subscriptions')
 async def subscriptions_list(request):
+    if config.PUBLIC_MODE:
+        return web.Response(text=serializer.encode([]))
     return web.Response(text=serializer.encode([s.to_public_dict() for s in submgr.list_all()]))
 
 
 @routes.post(config.URL_PREFIX + 'subscriptions/update')
 async def subscriptions_update(request):
+    if config.PUBLIC_MODE:
+        raise web.HTTPForbidden(reason='subscriptions are disabled in public mode')
     post = await _read_json_request(request)
     sub_id = post.get('id')
     if not sub_id:
@@ -835,6 +915,8 @@ async def subscriptions_update(request):
 
 @routes.post(config.URL_PREFIX + 'subscriptions/delete')
 async def subscriptions_delete(request):
+    if config.PUBLIC_MODE:
+        raise web.HTTPForbidden(reason='subscriptions are disabled in public mode')
     post = await _read_json_request(request)
     ids = post.get('ids')
     if not ids or not isinstance(ids, list):
@@ -845,6 +927,8 @@ async def subscriptions_delete(request):
 
 @routes.post(config.URL_PREFIX + 'subscriptions/check')
 async def subscriptions_check(request):
+    if config.PUBLIC_MODE:
+        raise web.HTTPForbidden(reason='subscriptions are disabled in public mode')
     post = await _read_json_request(request)
     ids = post.get('ids')
     if ids is not None and not isinstance(ids, list):
@@ -955,13 +1039,45 @@ async def history(request):
 @sio.event
 async def connect(sid, environ):
     log.info(f"Client connected: {sid}")
-    await sio.emit('all', serializer.encode(dqueue.get()), to=sid)
-    await sio.emit('subscriptions_all', serializer.encode([s.to_public_dict() for s in submgr.list_all()]), to=sid)
+    if config.PUBLIC_MODE:
+        visit_id = _public_visit_from_environ(environ)
+        if visit_id:
+            public_sid_visit[sid] = visit_id
+            public_visit_sids.setdefault(visit_id, set()).add(sid)
+    if config.PUBLIC_MODE:
+        await sio.emit('all', serializer.encode(([], [])), to=sid)
+    else:
+        await sio.emit('all', serializer.encode(dqueue.get()), to=sid)
+    if not config.PUBLIC_MODE:
+        await sio.emit('subscriptions_all', serializer.encode([s.to_public_dict() for s in submgr.list_all()]), to=sid)
     await sio.emit('configuration', serializer.encode(config.frontend_safe()), to=sid)
     if config.CUSTOM_DIRS:
         await sio.emit('custom_dirs', serializer.encode(get_custom_dirs()), to=sid)
     if config.YTDL_OPTIONS_FILE:
         await sio.emit('ytdl_options_changed', serializer.encode(get_options_update_time()), to=sid)
+
+@sio.event
+async def disconnect(sid):
+    if not config.PUBLIC_MODE:
+        return
+    visit_id = public_sid_visit.pop(sid, '')
+    if not visit_id:
+        return
+    sids = public_visit_sids.get(visit_id, set())
+    sids.discard(sid)
+    if sids:
+        return
+    public_visit_sids.pop(visit_id, None)
+    owned = list(public_visit_downloads.pop(visit_id, set()))
+    for url in owned:
+        public_download_owner.pop(url, None)
+    # remove any lingering id ownership for this visit
+    for dl_id, owner in list(public_download_owner_by_id.items()):
+        if owner == visit_id:
+            public_download_owner_by_id.pop(dl_id, None)
+    if owned:
+        await dqueue.cancel(owned)
+
 
 def get_custom_dirs():
     cache_ttl_seconds = 5
@@ -1027,7 +1143,7 @@ def get_custom_dirs():
 
 @routes.get(config.URL_PREFIX)
 async def index(request):
-    response = web.FileResponse(os.path.join(config.BASE_DIR, 'ui/dist/metube/browser/index.html'))
+    response = web.FileResponse(os.path.join(config.BASE_DIR, 'ui/dist/mytube/browser/index.html'))
     if 'metube_theme' not in request.cookies:
         response.set_cookie('metube_theme', config.DEFAULT_THEME)
     return response
@@ -1060,11 +1176,11 @@ if config.URL_PREFIX != '/':
 
 routes.static(config.URL_PREFIX + 'download/', config.DOWNLOAD_DIR, show_index=config.DOWNLOAD_DIRS_INDEXABLE)
 routes.static(config.URL_PREFIX + 'audio_download/', config.AUDIO_DOWNLOAD_DIR, show_index=config.DOWNLOAD_DIRS_INDEXABLE)
-routes.static(config.URL_PREFIX, os.path.join(config.BASE_DIR, 'ui/dist/metube/browser'))
+routes.static(config.URL_PREFIX, os.path.join(config.BASE_DIR, 'ui/dist/mytube/browser'))
 try:
     app.add_routes(routes)
 except ValueError as e:
-    if 'ui/dist/metube/browser' in str(e):
+    if 'ui/dist/mytube/browser' in str(e):
         raise RuntimeError('Could not find the frontend UI static assets. Please run `node_modules/.bin/ng build` inside the ui folder') from e
     raise e
 
