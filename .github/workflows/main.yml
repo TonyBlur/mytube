@@ -58,6 +58,12 @@ jobs:
         id: date
         run: echo "date=$(date +'%Y.%m.%d')" >> "$GITHUB_OUTPUT"
       -
+        name: Prepare GHCR repository name (lowercase)
+        id: ghcr-repo
+        run: |
+          GHCR_REPO=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "repository=$GHCR_REPO" >> "$GITHUB_OUTPUT"
+      -
         name: Checkout
         uses: actions/checkout@v6
       -
@@ -91,8 +97,8 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_REPOSITORY }}:latest
             ${{ secrets.DOCKERHUB_REPOSITORY }}:${{ steps.date.outputs.date }}
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ steps.date.outputs.date }}
+            ${{ steps.ghcr-repo.outputs.repository }}:latest
+            ${{ steps.ghcr-repo.outputs.repository }}:${{ steps.date.outputs.date }}
 
   dockerhub-sync-readme:
     needs: dockerhub-build-push
