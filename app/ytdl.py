@@ -447,6 +447,22 @@ class Download:
                         for subtitle in requested_subtitles.values():
                             if isinstance(subtitle, dict) and subtitle.get('filepath'):
                                 self.status_queue.put({'subtitle_file': subtitle['filepath']})
+                    elif getattr(self.info, 'download_type', '') == 'thumbnail':
+                        info_dict = d.get('info_dict', {}) or {}
+                        image_exts = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')
+
+                        def enqueue_if_image(path: str | None):
+                            if isinstance(path, str) and path.lower().endswith(image_exts):
+                                self.status_queue.put({'thumbnail_file': path})
+
+                        # Common yt-dlp structures where thumbnail paths may appear.
+                        enqueue_if_image(info_dict.get('thumbnail'))
+                        for thumb in (info_dict.get('thumbnails') or []):
+                            if isinstance(thumb, dict):
+                                enqueue_if_image(thumb.get('filepath') or thumb.get('filename') or thumb.get('url'))
+                        for item in (info_dict.get('requested_downloads') or []):
+                            if isinstance(item, dict):
+                                enqueue_if_image(item.get('filepath') or item.get('filename'))
 
                 # Capture all chapter files when SplitChapters finishes
                 elif d.get('postprocessor') == 'SplitChapters' and d.get('status') == 'finished':
@@ -565,10 +581,11 @@ class Download:
                     allowed_caption_exts = ('.txt',) if requested_subtitle_format == 'txt' else ('.vtt', '.srt', '.sbv', '.scc', '.ttml', '.dfxp')
                     if not rel_name.lower().endswith(allowed_caption_exts):
                         continue
+                if getattr(self.info, 'download_type', '') == 'thumbnail':
+                    if not rel_name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')):
+                        continue
                 self.info.filename = rel_name
                 self.info.size = os.path.getsize(fileName) if os.path.exists(fileName) else None
-                if getattr(self.info, 'download_type', '') == 'thumbnail':
-                    self.info.filename = re.sub(r'\.webm$', '.jpg', self.info.filename)
 
             # Handle chapter files
             log.debug(f"Update status for {self.info.title}: {status}")
@@ -613,7 +630,13 @@ class Download:
                     str(getattr(self.info, 'format', '')).lower() == 'txt'
                 ):
                     self.info.filename = rel_path
-                    self.info.size = file_size
+
+            if 'thumbnail_file' in status:
+                thumbnail_file = status.get('thumbnail_file')
+                if thumbnail_file and os.path.isfile(thumbnail_file):
+                    rel_path = os.path.relpath(thumbnail_file, self.download_dir)
+                    self.info.filename = rel_path
+                    self.info.size = os.path.getsize(thumbnail_file)
                 continue
 
             self.info.status = status['status']
