@@ -448,40 +448,50 @@ def _migrate_legacy_request(post: dict) -> dict:
 
 public_visit_downloads: dict[str, set[str]] = {}
 public_download_owner: dict[str, str] = {}
+public_download_owner_by_key: dict[str, str] = {}
 public_download_owner_by_id: dict[str, str] = {}
 public_visit_sids: dict[str, set[str]] = {}
 public_sid_visit: dict[str, str] = {}
 
 
-def _register_public_download(visit_id: str, url: str):
-    if not visit_id or not url:
+def _register_public_download(visit_id: str, owner_key: str):
+    if not visit_id or not owner_key:
         return
-    public_visit_downloads.setdefault(visit_id, set()).add(url)
-    public_download_owner[url] = visit_id
+    public_visit_downloads.setdefault(visit_id, set()).add(owner_key)
+    public_download_owner[owner_key] = visit_id
 
 
-def _forget_public_download(url: str | None = None, *, dl_id: str | None = None):
+def _forget_public_download(owner_key: str | None = None, *, dl_id: str | None = None):
     visit_id = None
+    keys_to_remove = set()
     if dl_id:
         visit_id = public_download_owner_by_id.pop(dl_id, None)
-    if visit_id is None and url:
-        visit_id = public_download_owner.pop(url, None)
+        keys_to_remove.add(dl_id)
+    if owner_key:
+        visit_id = visit_id or public_download_owner_by_key.pop(owner_key, None)
+        keys_to_remove.add(owner_key)
+    if owner_key and visit_id is None:
+        visit_id = public_download_owner.pop(owner_key, None)
+    if visit_id is None:
+        for key in list(keys_to_remove):
+            owner = public_download_owner.pop(key, None)
+            visit_id = visit_id or owner
     if not visit_id:
         return
-    urls = public_visit_downloads.get(visit_id)
-    if not urls:
+    owned = public_visit_downloads.get(visit_id)
+    if not owned:
         return
-    if url:
-        urls.discard(url)
-    if not urls:
+    for key in keys_to_remove:
+        owned.discard(key)
+    if not owned:
         public_visit_downloads.pop(visit_id, None)
 
 
-async def _emit_download_event(event: str, payload, *, url: str | None = None, dl_id: str | None = None):
+async def _emit_download_event(event: str, payload, *, owner_key: str | None = None, url: str | None = None, dl_id: str | None = None):
     if not config.PUBLIC_MODE:
         await sio.emit(event, payload)
         return
-    visit_id = (public_download_owner_by_id.get(dl_id) if dl_id else None) or (public_download_owner.get(url) if url else None)
+    visit_id = (public_download_owner_by_id.get(dl_id) if dl_id else None) or (public_download_owner_by_key.get(owner_key) if owner_key else None) or (public_download_owner.get(owner_key) if owner_key else None) or (public_download_owner.get(url) if url else None)
     if not visit_id:
         return
     for sid in list(public_visit_sids.get(visit_id, set())):
@@ -497,27 +507,35 @@ class Notifier(DownloadQueueNotifier):
     async def added(self, dl):
         log.info(f"Notifier: Download added - {dl.title}")
         visit_id = public_download_owner.get(dl.url)
+        owner_key = getattr(dl, 'key', None)
+        if visit_id and owner_key:
+            public_download_owner_by_key[owner_key] = visit_id
+            public_download_owner[owner_key] = visit_id
+            public_visit_downloads.setdefault(visit_id, set()).add(owner_key)
         if visit_id:
             public_download_owner_by_id[dl.id] = visit_id
-        await _emit_download_event('added', serializer.encode(dl), url=dl.url, dl_id=dl.id)
+            public_download_owner[dl.id] = visit_id
+            public_visit_downloads.setdefault(visit_id, set()).add(dl.id)
+        await _emit_download_event('added', serializer.encode(dl), owner_key=owner_key, url=dl.url, dl_id=dl.id)
 
     async def updated(self, dl):
         log.debug(f"Notifier: Download updated - {dl.title}")
-        await _emit_download_event('updated', serializer.encode(dl), url=dl.url, dl_id=dl.id)
+        await _emit_download_event('updated', serializer.encode(dl), owner_key=getattr(dl, 'key', None), url=dl.url, dl_id=dl.id)
 
     async def completed(self, dl):
         log.info(f"Notifier: Download completed - {dl.title}")
-        await _emit_download_event('completed', serializer.encode(dl), url=dl.url, dl_id=dl.id)
-        _forget_public_download(dl.url, dl_id=dl.id)
+        owner_key = getattr(dl, 'key', None)
+        await _emit_download_event('completed', serializer.encode(dl), owner_key=owner_key, url=dl.url, dl_id=dl.id)
+        _forget_public_download(owner_key or dl.url, dl_id=dl.id)
 
     async def canceled(self, id):
         log.info(f"Notifier: Download canceled - {id}")
-        await _emit_download_event('canceled', serializer.encode(id), url=id, dl_id=id)
+        await _emit_download_event('canceled', serializer.encode(id), owner_key=id, url=id, dl_id=id)
         _forget_public_download(id, dl_id=id)
 
     async def cleared(self, id):
         log.info(f"Notifier: Download cleared - {id}")
-        await _emit_download_event('cleared', serializer.encode(id), url=id, dl_id=id)
+        await _emit_download_event('cleared', serializer.encode(id), owner_key=id, url=id, dl_id=id)
 
 dqueue = DownloadQueue(config, Notifier())
 app.on_startup.append(lambda app: dqueue.initialize())
@@ -1055,8 +1073,9 @@ async def disconnect(sid):
         return
     public_visit_sids.pop(visit_id, None)
     owned = list(public_visit_downloads.pop(visit_id, set()))
-    for url in owned:
-        public_download_owner.pop(url, None)
+    for key in owned:
+        public_download_owner.pop(key, None)
+        public_download_owner_by_key.pop(key, None)
     # remove any lingering id ownership for this visit
     for dl_id, owner in list(public_download_owner_by_id.items()):
         if owner == visit_id:
