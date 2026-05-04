@@ -509,10 +509,25 @@ def _public_visit_from_environ(environ: dict) -> str:
 class Notifier(DownloadQueueNotifier):
     async def added(self, dl):
         log.info(f"Notifier: Download added - {dl.title}")
-        visit_id = public_download_owner.get(dl.url)
+        visit_id = None
+        candidates = [getattr(dl, 'url', None)]
+        entry = getattr(dl, 'entry', None) or {}
+        if isinstance(entry, dict):
+            for key in ('url', 'webpage_url', 'original_url'):
+                v = entry.get(key)
+                if v:
+                    candidates.append(v)
+        for cand in candidates:
+            if not cand:
+                continue
+            visit_id = public_download_owner.get(cand)
+            if visit_id:
+                break
+
         if visit_id:
             public_download_owner_by_id[dl.id] = visit_id
             _register_public_download_key(visit_id, getattr(dl, 'key', None))
+
         await _emit_download_event('added', serializer.encode(dl), url=dl.url, dl_id=dl.id, dl_key=getattr(dl, 'key', None))
 
     async def updated(self, dl):
@@ -797,6 +812,22 @@ async def add(request):
         if not visit_id:
             raise web.HTTPBadRequest(reason='missing X-Visit-Id in public mode')
         _register_public_download(visit_id, o['url'])
+        # Also attempt to extract metadata for the URL and register the
+        # canonical webpage_url (if different). This ensures short links
+        # (eg. youtu.be) and yt-dlp-normalised links both map to the same
+        # public visit so socket events are delivered.
+        try:
+            extractor = getattr(dqueue, '_DownloadQueue__extract_info', None)
+            if extractor is not None:
+                loop = asyncio.get_running_loop()
+                entry = await loop.run_in_executor(None, lambda: extractor(o['url'], o.get('ytdl_options_presets'), o.get('ytdl_options_overrides')))
+                if isinstance(entry, dict):
+                    webpage = entry.get('webpage_url') or entry.get('url') or entry.get('original_url')
+                    if webpage and webpage != o['url']:
+                        _register_public_download(visit_id, webpage)
+        except Exception:
+            # Extraction failure shouldn't block the add operation; log and continue.
+            log.debug('Could not extract entry to register canonical public URL', exc_info=True)
     status = await dqueue.add(
         o['url'],
         o['download_type'],

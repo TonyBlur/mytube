@@ -919,7 +919,58 @@ class DownloadQueue:
         dldirectory, error_message = self.__calc_download_path(dl.download_type, dl.folder)
         if error_message is not None:
             return error_message
-        output = self.config.OUTPUT_TEMPLATE if len(dl.custom_name_prefix) == 0 else f'{dl.custom_name_prefix}.{self.config.OUTPUT_TEMPLATE}'
+        suffix = None
+        if not getattr(dl, 'custom_name_prefix', None):
+            parts = []
+            if getattr(dl, 'quality', ''):
+                parts.append(str(dl.quality))
+            codec_value = getattr(dl, 'codec', '')
+            if str(codec_value).lower() == 'auto':
+                entry = getattr(dl, 'entry', None) or {}
+                resolved = None
+                if isinstance(entry, dict):
+                    vc = entry.get('vcodec')
+                    ac = entry.get('acodec')
+                    if vc:
+                        resolved = vc
+                    elif ac:
+                        resolved = ac
+                    else:
+                        for fld in ('requested_formats', 'formats'):
+                            lst = entry.get(fld) or []
+                            if isinstance(lst, list):
+                                for it in lst:
+                                    if isinstance(it, dict):
+                                        if it.get('vcodec'):
+                                            resolved = it.get('vcodec')
+                                            break
+                                        if it.get('acodec'):
+                                            resolved = it.get('acodec')
+                                            break
+                            if resolved:
+                                break
+                if resolved:
+                    s = str(resolved).lower()
+                    if 'avc' in s or 'h264' in s:
+                        codec_value = 'h264'
+                    elif 'hevc' in s or 'h265' in s or 'h.265' in s:
+                        codec_value = 'h265'
+                    elif 'av01' in s or 'av1' in s:
+                        codec_value = 'av1'
+                    elif 'vp9' in s or 'vp09' in s:
+                        codec_value = 'vp9'
+                    else:
+                        codec_value = re.sub(r'[^0-9a-zA-Z]+', '_', s)
+
+            if codec_value:
+                parts.append(str(codec_value))
+            if parts:
+                suffix = '_'.join(_sanitize_path_component(p) for p in parts if p)
+
+        if getattr(dl, 'custom_name_prefix', None):
+            output = self.config.OUTPUT_TEMPLATE if len(dl.custom_name_prefix) == 0 else f'{dl.custom_name_prefix}.{self.config.OUTPUT_TEMPLATE}'
+        else:
+            output = self.config.OUTPUT_TEMPLATE
         output_chapter = self.config.OUTPUT_TEMPLATE_CHAPTER
         entry = getattr(dl, 'entry', None)
         if entry is not None and entry.get('playlist_index') is not None:
@@ -932,6 +983,13 @@ class DownloadQueue:
                 output = self.config.OUTPUT_TEMPLATE_CHANNEL
             sanitized = {k: _sanitize_path_component(v) for k, v in entry.items()}
             output = _resolve_outtmpl_fields(output, sanitized, ('channel',))
+        if suffix:
+            token = '%(ext)s'
+            idx = output.rfind(token)
+            if idx != -1:
+                output = output[:idx] + f'{suffix}.{token}'
+            else:
+                output = f'{output}.{suffix}'
         ytdl_options = self._build_ytdl_options(
             getattr(dl, 'ytdl_options_presets', None),
             getattr(dl, 'ytdl_options_overrides', {}) or {},

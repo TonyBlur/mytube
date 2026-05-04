@@ -1,7 +1,7 @@
 # MyTube
 
 ![Build Status](https://github.com/TonyBlur/mytube/actions/workflows/main.yml/badge.svg)
-![Docker Pulls](https://img.shields.io/docker/pulls/tonyblur/mytube.svg)
+![Docker Pulls](https://img.shields.io/docker/pulls/tonyblu/mytube.svg)
 
 MyTube is a self-hosted web UI for `yt-dlp`, for downloading media from YouTube and [dozens of other sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
 
