@@ -1,11 +1,18 @@
+<div align="center">
+
+<img src="https://github.com/TonyBlur/mytube/blob/master/ui/src/assets/icons/android-chrome-192x192.png?raw=true" width="96" height="96">
+
 # MyTube
 
 ![Build Status](https://github.com/TonyBlur/mytube/actions/workflows/main.yml/badge.svg)
 ![Docker Pulls](https://img.shields.io/docker/pulls/tonyblu/mytube.svg)
 
+</div>
+
 MyTube is a self-hosted web UI for `yt-dlp`, for downloading media from YouTube and [dozens of other sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
 
 Key capabilities:
+
 * Download videos, audio, captions, and thumbnails from a browser UI.
 * Download playlists and channels, with configurable output and download options.
 * Subscribe to channels and playlists, periodically check for new items, and queue new uploads automatically.
@@ -45,6 +52,7 @@ docker-compose up -d
 ```
 
 Logs can be viewed with:
+
 ```bash
 docker-compose logs -f mytube
 ```
@@ -62,10 +70,7 @@ docker-compose logs -f mytube
 ### Available variables
 
 You can also load variables from files:
-* Docker CLI supports `--env-file /path/to/.env`.
-* The container entrypoint auto-loads `/app/.env` if present, and also loads a custom file when `ENV_FILE` points to it.
 
-You can also load variables from files:
 * Docker CLI supports `--env-file /path/to/.env`.
 * The container entrypoint auto-loads `/app/.env` if present, and also loads a custom file when `ENV_FILE` points to it.
 
@@ -83,15 +88,15 @@ You can also load variables from files:
 
 * __DOWNLOAD_DIR__: Path to where the downloads will be saved. Defaults to `/downloads` in the Docker image, and `.` otherwise.
 * __AUDIO_DOWNLOAD_DIR__: Path to where audio-only downloads will be saved, if you wish to separate them from the video downloads. Defaults to the value of `DOWNLOAD_DIR`.
-* __CUSTOM_DIRS__: Whether to enable downloading videos into custom directories within the __DOWNLOAD_DIR__ (or __AUDIO_DOWNLOAD_DIR__). When enabled, a dropdown appears next to the Add button to specify the download directory. Defaults to `true`.
-* __CREATE_CUSTOM_DIRS__: Whether to support automatically creating directories within the __DOWNLOAD_DIR__ (or __AUDIO_DOWNLOAD_DIR__) if they do not exist. When enabled, the download directory selector supports free-text input, and the specified directory will be created recursively. Defaults to `true`.
-* __CUSTOM_DIRS_EXCLUDE_REGEX__: Regular expression to exclude some custom directories from the dropdown. Empty regex disables exclusion. Defaults to `(^|/)[.@].*$`, which means directories starting with `.` or `@`.
+* __CUSTOM_DIRS__: Enable choosing custom subdirectories under __DOWNLOAD_DIR__ or __AUDIO_DOWNLOAD_DIR__. Defaults to `true`.
+* __CREATE_CUSTOM_DIRS__: Allow free-text directory names and create missing directories recursively. Defaults to `true`.
+* __CUSTOM_DIRS_EXCLUDE_REGEX__: Regex for directories hidden from the dropdown. Empty disables exclusion. Defaults to `(^|/)[.@].*$`.
 * __DOWNLOAD_DIRS_INDEXABLE__: If `true`, the download directories (__DOWNLOAD_DIR__ and __AUDIO_DOWNLOAD_DIR__) are indexable on the web server. Defaults to `false`.
 * __STATE_DIR__: Path to where mytube will store its persistent state files (`queue.json`, `pending.json`, `completed.json`, `subscriptions.json`). Defaults to `/downloads/.mytube` in the Docker image, and `.` otherwise.
-* __TEMP_DIR__: Path where intermediary download files will be saved. Defaults to `/downloads` in the Docker image, and `.` otherwise.
+* __TEMP_DIR__: Path for intermediary download files. Defaults to `/downloads` in the Docker image, and `.` otherwise.
   * Set this to an SSD or RAM filesystem (e.g., `tmpfs`) for better performance.
   * __Note__: Using a RAM filesystem may prevent downloads from being resumed.
-* __CHOWN_DIRS__: If `false`, ownership of `DOWNLOAD_DIR`, `STATE_DIR`, and `TEMP_DIR` (and their contents) will not be set on container start. Ensure user under which mytube runs has necessary access to these directories already. Defaults to `true`.
+* __CHOWN_DIRS__: If `false`, skip chown for configured directories on container start. Defaults to `true`.
 
 ### 📝 File Naming & yt-dlp
 
@@ -115,7 +120,7 @@ You can also load variables from files:
 * __HTTPS__: Use `https` instead of `http` (__CERTFILE__ and __KEYFILE__ required). Defaults to `false`.
 * __CERTFILE__: HTTPS certificate file path.
 * __KEYFILE__: HTTPS key file path.
-* __CORS_ALLOWED_ORIGINS__: Comma-separated list of origins permitted to make cross-origin requests to the mytube API. When unset or empty, all cross-origin requests are denied. Set to `*` to allow all origins. This must be configured for [browser extensions](#-browser-extensions), [bookmarklets](#-bookmarklet), and any other browser-based tools that contact mytube from a different origin. For browser extensions use `*` (see below); for bookmarklets you can list specific sites, e.g. `https://www.youtube.com,https://www.vimeo.com`.
+* __CORS_ALLOWED_ORIGINS__: Comma-separated origins allowed to call the API. Empty denies cross-origin requests; `*` allows all. Required for [browser extensions](#-browser-extensions), [bookmarklets](#-bookmarklet), and similar tools.
 * __ROBOTS_TXT__: A path to a `robots.txt` file mounted in the container.
 
 ### 🏠 Basic Setup
@@ -126,6 +131,7 @@ You can also load variables from files:
 * __DEFAULT_THEME__: Default theme to use for the UI, can be set to `light`, `dark`, or `auto`. Defaults to `auto`.
 * __LOGLEVEL__: Log level, can be set to `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, or `NONE`. Defaults to `INFO`. 
 * __ENABLE_ACCESSLOG__: Whether to enable access log. Defaults to `false`.
+* __PUBLIC_MODE__: Hide other visitors' download history and disable subscriptions for shared/public instances. Defaults to `false`.
 
 ## 🎛️ Configuring yt-dlp options
 
@@ -212,6 +218,7 @@ If both are used and they define a preset with the same name, the **file's versi
 ```
 
 This makes three presets available in the UI:
+
 * **sponsorblock** — strips sponsor, self-promo, and interaction segments from videos.
 * **embed-subs** — downloads English and German subtitles and embeds them into the video file.
 * **limit-rate** — caps download speed to ~5 MB/s.
@@ -246,8 +253,9 @@ MyTube always forces its own flat-extract behaviour during the initial metadata 
 ### Configuration cookbooks
 
 The project's Wiki contains examples of useful configurations contributed by users of MyTube:
-* [YTDL_OPTIONS Cookbook](https://github.com/TonyBlur/mytube/wiki/YTDL_OPTIONS-Cookbook)
-* [OUTPUT_TEMPLATE Cookbook](https://github.com/TonyBlur/mytube/wiki/OUTPUT_TEMPLATE-Cookbook)
+
+* [YTDL_OPTIONS Cookbook](https://github.com/alexta69/metube/wiki/YTDL_OPTIONS-Cookbook)
+* [OUTPUT_TEMPLATE Cookbook](https://github.com/alexta69/metube/wiki/OUTPUT_TEMPLATE-Cookbook)
 
 ## 🍪 Using browser cookies
 
@@ -421,4 +429,5 @@ docker build -t mytube .
 Note that if you're running the server in VSCode, your downloads will go to your user's Downloads folder (this is configured via the environment in `.vscode/launch.json`).
 
 ## 🍴 Fork note
+
 This project is forked from [alexta69/metube](https://github.com/alexta69/metube).

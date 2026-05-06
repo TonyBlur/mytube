@@ -1,6 +1,6 @@
 import { inject, Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
-import { of, Subject } from 'rxjs';
+import { of, Subject, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { MeTubeSocket } from './metube-socket.service';
 import { Download, Status, State } from '../interfaces';
@@ -179,15 +179,42 @@ export class DownloadsService {
 
   public delById(where: State, ids: string[]) {
     const map = this[where];
+    const touched: [string, Download, boolean | undefined][] = [];
     if (map) {
       for (const id of ids) {
         const obj = map.get(id);
         if (obj) {
+          touched.push([id, obj, obj.deleting]);
           obj.deleting = true;
+          if (where === 'done') {
+            map.delete(id);
+          }
         }
       }
+      if (where === 'queue') {
+        this.queueChanged.next();
+      } else if (where === 'done') {
+        this.doneChanged.next();
+      }
     }
-    return this.http.post('delete', {where: where, ids: ids});
+    return this.http.post('delete', {where: where, ids: ids}).pipe(
+      catchError((error: HttpErrorResponse) => {
+        if (map) {
+          for (const [id, obj, deleting] of touched) {
+            obj.deleting = deleting;
+            if (where === 'done' && !map.has(id)) {
+              map.set(id, obj);
+            }
+          }
+          if (where === 'queue') {
+            this.queueChanged.next();
+          } else if (where === 'done') {
+            this.doneChanged.next();
+          }
+        }
+        return throwError(() => error);
+      })
+    );
   }
 
   public startByFilter(where: State, filter: (dl: Download) => boolean) {
@@ -198,7 +225,7 @@ export class DownloadsService {
 
   public delByFilter(where: State, filter: (dl: Download) => boolean) {
     const ids: string[] = [];
-    this[where].forEach((dl: Download) => { if (filter(dl)) ids.push(dl.url) });
+    this[where].forEach((dl: Download, key: string) => { if (filter(dl)) ids.push(key) });
     return this.delById(where, ids);
   }
   public cancelAdd() {

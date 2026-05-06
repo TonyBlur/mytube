@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   mytube:
-    image: ghcr.io/tonyblur/mytube
+    image: mytube
     container_name: mytube
     restart: unless-stopped
     ports:
@@ -45,7 +45,7 @@ services:
       # === Web Server ===
       # - HOST=0.0.0.0
       # - PORT=8081
-      - PUBLIC_MODE=false
+      - PUBLIC_MODE=true
       # - URL_PREFIX=/mytube/
       # - PUBLIC_HOST_URL=download/
       # - PUBLIC_HOST_AUDIO_URL=audio_download/

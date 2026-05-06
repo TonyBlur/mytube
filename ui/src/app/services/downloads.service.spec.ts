@@ -46,6 +46,28 @@ function basePayload(): AddDownloadPayload {
   };
 }
 
+function makeDownload(overrides: Partial<Download> = {}): Download {
+  return {
+    id: '1',
+    title: 't',
+    url: 'u1',
+    download_type: 'video',
+    quality: 'best',
+    format: 'any',
+    folder: '',
+    custom_name_prefix: '',
+    playlist_item_limit: 0,
+    status: 'finished',
+    msg: '',
+    percent: 0,
+    speed: 0,
+    eta: 0,
+    filename: '',
+    checked: false,
+    ...overrides,
+  };
+}
+
 describe('DownloadsService', () => {
   let socket: MeTubeSocketStub;
   let httpMock: HttpTestingController;
@@ -132,30 +154,53 @@ describe('DownloadsService', () => {
   });
 
   it('delById marks items deleting and posts delete', () => {
-    const dl: Download = {
-      id: '1',
-      title: 't',
-      url: 'u1',
-      download_type: 'video',
-      quality: 'best',
-      format: 'any',
-      folder: '',
-      custom_name_prefix: '',
-      playlist_item_limit: 0,
-      status: 'finished',
-      msg: '',
-      percent: 0,
-      speed: 0,
-      eta: 0,
-      filename: '',
-      checked: false,
-      deleting: false,
-    };
+    const dl = makeDownload({ deleting: false });
     service.queue.set('u1', dl);
     service.delById('queue', ['u1']).subscribe();
     expect(dl.deleting).toBe(true);
     const req = httpMock.expectOne('delete');
     expect(req.request.body).toEqual({ where: 'queue', ids: ['u1'] });
+    req.flush({});
+  });
+
+  it('delById removes done items immediately', () => {
+    const dl = makeDownload({ deleting: false });
+    let doneChanged = 0;
+    service.doneChanged.subscribe(() => doneChanged++);
+    service.done.set('done-key', dl);
+
+    service.delById('done', ['done-key']).subscribe();
+
+    expect(service.done.has('done-key')).toBe(false);
+    expect(dl.deleting).toBe(true);
+    expect(doneChanged).toBe(1);
+    const req = httpMock.expectOne('delete');
+    expect(req.request.body).toEqual({ where: 'done', ids: ['done-key'] });
+    req.flush({});
+  });
+
+  it('delById restores optimistically removed done items on error', () => {
+    const dl = makeDownload({ deleting: false });
+    service.done.set('done-key', dl);
+
+    service.delById('done', ['done-key']).subscribe({ error: () => undefined });
+    const req = httpMock.expectOne('delete');
+    req.flush('failed', { status: 500, statusText: 'Server Error' });
+
+    expect(service.done.get('done-key')).toBe(dl);
+    expect(dl.deleting).toBe(false);
+  });
+
+  it('delByFilter posts map keys instead of source URLs', () => {
+    service.done.set('unique-key', makeDownload({
+      url: 'https://example.com/original-url',
+      status: 'finished',
+    }));
+
+    service.delByFilter('done', dl => dl.status === 'finished').subscribe();
+
+    const req = httpMock.expectOne('delete');
+    expect(req.request.body).toEqual({ where: 'done', ids: ['unique-key'] });
     req.flush({});
   });
 

@@ -4,8 +4,9 @@ on:
   push:
     branches:
       - 'master'
-    paths-ignore:
-      - '**.md'
+  pull_request:
+    branches:
+      - 'master'
 
 jobs:
   quality-checks:
@@ -16,7 +17,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: lts/*
+          node-version: 22
       - name: Enable pnpm
         run: corepack enable
       - name: Install frontend dependencies
@@ -35,10 +36,14 @@ jobs:
           CI: true
       - name: Install uv
         uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - name: Install Python dependencies
         run: uv sync --frozen --group dev
       - name: Run backend smoke checks
-        run: python -m compileall app
+        run: uv run python -m compileall app
       - name: Run backend tests
         run: uv run pytest app/tests/
       - name: Run Trivy filesystem scan
@@ -51,7 +56,10 @@ jobs:
 
   dockerhub-build-push:
     needs: quality-checks
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      ghcr_repo: ${{ steps.ghcr-repo.outputs.ghcr_repo }}
     steps:
       -
         name: Get current date
@@ -62,7 +70,7 @@ jobs:
         id: ghcr-repo
         run: |
           GHCR_REPO=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "repository=$GHCR_REPO" >> "$GITHUB_OUTPUT"
+          echo "ghcr_repo=$GHCR_REPO" >> "$GITHUB_OUTPUT"
       -
         name: Checkout
         uses: actions/checkout@v6
@@ -99,8 +107,8 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_REPOSITORY }}:latest
             ${{ secrets.DOCKERHUB_REPOSITORY }}:${{ steps.date.outputs.date }}
-            ${{ steps.ghcr-repo.outputs.repository }}:latest
-            ${{ steps.ghcr-repo.outputs.repository }}:${{ steps.date.outputs.date }}
+            ${{ steps.ghcr-repo.outputs.ghcr_repo }}:latest
+            ${{ steps.ghcr-repo.outputs.ghcr_repo }}:${{ steps.date.outputs.date }}
 
   dockerhub-sync-readme:
     needs: dockerhub-build-push
@@ -167,7 +175,7 @@ jobs:
         id: release_body
         env:
           DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPOSITORY }}
-          GHCR_REPO: ghcr.io/${{ github.repository }}
+          GHCR_REPO: ${{ needs.dockerhub-build-push.outputs.ghcr_repo }}
           DATE: ${{ steps.date.outputs.date }}
           HAS_COMMITS: ${{ steps.commits.outputs.has_commits }}
           COMMITS: ${{ steps.commits.outputs.commits }}

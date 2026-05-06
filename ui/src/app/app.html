@@ -1,4 +1,4 @@
-<nav class="navbar navbar-expand-md navbar-dark">
+<nav class="navbar navbar-expand-md shadow-sm">
   <div class="container-fluid">
     <a class="navbar-brand d-flex align-items-center" href="#">
       <img src="assets/icons/android-chrome-192x192.png" alt="MyTube Logo" height="32" class="me-2">
@@ -681,7 +681,7 @@
       Connecting to server...
     </div>
   }
-  <div class="metube-section-header">Downloading</div>
+  <div class="metube-section-header shadow-sm">Downloading</div>
   <div class="px-2 py-3 border-bottom">
     <button type="button" class="btn btn-link text-decoration-none px-0 me-4" disabled #queueDelSelected (click)="delSelectedDownloads('queue')"><fa-icon [icon]="faTrashAlt" />&nbsp; Cancel selected</button>
     <button type="button" class="btn btn-link text-decoration-none px-0 me-4" disabled #queueDownloadSelected (click)="startSelectedDownloads('queue')"><fa-icon [icon]="faDownload" />&nbsp; Download selected</button>
@@ -729,7 +729,7 @@
     </table>
   </div>
 
-  <div class="metube-section-header">Completed</div>
+  <div class="metube-section-header shadow-sm">Completed</div>
   <div class="px-2 py-3 border-bottom">
     <button type="button" class="btn btn-link text-decoration-none px-0 me-4" (click)="toggleSortOrder()" ngbTooltip="{{ sortAscending ? 'Oldest first' : 'Newest first' }}"><fa-icon [icon]="sortAscending ? faSortAmountUp : faSortAmountDown" />&nbsp; {{ sortAscending ? 'Oldest first' : 'Newest first' }}</button>
     <button type="button" class="btn btn-link text-decoration-none px-0 me-4" disabled #doneDelSelected (click)="delSelectedDownloads('done')"><fa-icon [icon]="faTrashAlt" />&nbsp; Clear selected</button>
@@ -882,7 +882,7 @@
   </div>
 
   @if (!isPublicMode()) {
-  <div class="metube-section-header">Subscriptions</div>
+  <div class="metube-section-header shadow-sm">Subscriptions</div>
   <div class="px-2 py-3 border-bottom">
     @if (checkingAllSubscriptions) {
       <button type="button" class="btn btn-link text-decoration-none px-0 me-4" disabled>
