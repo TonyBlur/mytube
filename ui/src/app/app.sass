@@ -82,6 +82,11 @@ main
   border-color: color-mix(in srgb, var(--bs-primary) 55%, #fff)
   box-shadow: 0 0 0 .22rem color-mix(in srgb, var(--bs-primary) 20%, transparent)
 
+.input-group:not(.has-validation) > .form-control:last-of-type:not(.dropdown-toggle):not(.dropdown-menu):not(.form-floating),
+.input-group:not(.has-validation) > .form-select:last-of-type:not(.dropdown-toggle):not(.dropdown-menu):not(.form-floating)
+  border-top-right-radius: var(--bs-border-radius)
+  border-bottom-right-radius: var(--bs-border-radius)
+
 .btn-primary
   box-shadow: 0 6px 16px color-mix(in srgb, var(--bs-primary) 28%, transparent)
 

@@ -273,7 +273,8 @@
                 [(ngModel)]="format"
                 (change)="formatChanged()"
                 [disabled]="addInProgress || subscribeInProgress || downloads.loading"
-                ngbTooltip="Subtitle output format for captions mode">
+                ngbTooltip="Subtitle output format for captions mode"
+                container="body">
                 @for (f of formatOptions; track f.id) {
                   <option [ngValue]="f.id">{{ f.text }}</option>
                 }
@@ -291,13 +292,14 @@
                 (change)="subtitleLanguageChanged()"
                 [disabled]="addInProgress || subscribeInProgress || downloads.loading"
                 placeholder="e.g. en, es, zh-Hans"
-                ngbTooltip="Subtitle language (you can type any language code)">
-              <datalist id="subtitleLanguageOptions">
-                @for (lang of subtitleLanguages; track lang.id) {
-                  <option [value]="lang.id">{{ lang.text }}</option>
-                }
-              </datalist>
+                ngbTooltip="Subtitle language (you can type any language code)"
+                container="body">
             </div>
+            <datalist id="subtitleLanguageOptions">
+              @for (lang of subtitleLanguages; track lang.id) {
+                <option [value]="lang.id">{{ lang.text }}</option>
+              }
+            </datalist>
           </div>
           <div class="col-12 col-md-6 col-lg-3">
             <div class="input-group">
@@ -307,7 +309,8 @@
                 [(ngModel)]="subtitleMode"
                 (change)="subtitleModeChanged()"
                 [disabled]="addInProgress || subscribeInProgress || downloads.loading"
-                ngbTooltip="Choose manual, auto, or fallback preference for captions mode">
+                ngbTooltip="Choose manual, auto, or fallback preference for captions mode"
+                container="body">
                 @for (mode of subtitleModes; track mode.id) {
                   <option [ngValue]="mode.id">{{ mode.text }}</option>
                 }

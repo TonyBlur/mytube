@@ -211,9 +211,13 @@ class QualitySuffixValueTests(unittest.TestCase):
     def test_video_numeric_quality_gets_p_suffix(self):
         self.assertEqual(_quality_suffix_value(self._download_info(quality="2160")), "2160p")
 
-    def test_audio_best_stays_best(self):
+    def test_audio_best_uses_actual_bitrate_template(self):
         info = self._download_info(download_type="audio", quality="best")
-        self.assertEqual(_quality_suffix_value(info), "best")
+        self.assertEqual(_quality_suffix_value(info), "%(abr).0fkbps")
+
+    def test_audio_numeric_quality_gets_kbps_suffix(self):
+        info = self._download_info(download_type="audio", quality="192")
+        self.assertEqual(_quality_suffix_value(info), "192kbps")
 
 
 class CodecSuffixValueTests(unittest.TestCase):
@@ -223,7 +227,7 @@ class CodecSuffixValueTests(unittest.TestCase):
             title="t",
             url="http://example.com/v",
             quality="best",
-            download_type="video",
+            download_type=kwargs.pop("download_type", "video"),
             codec=kwargs.pop("codec", "auto"),
             format="any",
             folder="",
@@ -249,6 +253,10 @@ class CodecSuffixValueTests(unittest.TestCase):
     def test_unknown_auto_codec_is_sanitized(self):
         info = self._download_info(entry={"vcodec": "some codec/name"})
         self.assertEqual(_codec_suffix_value(info), "some_codec_name")
+
+    def test_audio_has_no_codec_suffix(self):
+        info = self._download_info(download_type="audio", codec="auto", entry={"acodec": "mp4a.40.2"})
+        self.assertEqual(_codec_suffix_value(info), "")
 
 
 class DownloadInfoSetstateTests(unittest.TestCase):

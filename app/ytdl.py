@@ -377,15 +377,24 @@ def _download_info_from_record(record: dict[str, Any]) -> DownloadInfo:
 
 def _quality_suffix_value(dl: DownloadInfo) -> str:
     quality = str(getattr(dl, 'quality', '') or '')
-    if getattr(dl, 'download_type', '') == 'video':
+    download_type = getattr(dl, 'download_type', '')
+    if download_type == 'video':
         if quality == 'best':
             return '%(height)sp'
         if re.fullmatch(r'\d+', quality):
             return f'{quality}p'
+    if download_type == 'audio':
+        if quality == 'best':
+            return '%(abr).0fkbps'
+        if re.fullmatch(r'\d+', quality):
+            return f'{quality}kbps'
     return quality
 
 
 def _codec_suffix_value(dl: DownloadInfo) -> str:
+    if getattr(dl, 'download_type', '') != 'video':
+        return ''
+
     codec_value = str(getattr(dl, 'codec', '') or '')
     if codec_value.lower() != 'auto':
         return codec_value
