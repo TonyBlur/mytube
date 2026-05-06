@@ -58,8 +58,6 @@ jobs:
     needs: quality-checks
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    outputs:
-      ghcr_repo: ${{ steps.ghcr-repo.outputs.ghcr_repo }}
     steps:
       -
         name: Get current date
@@ -175,11 +173,12 @@ jobs:
         id: release_body
         env:
           DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPOSITORY }}
-          GHCR_REPO: ${{ needs.dockerhub-build-push.outputs.ghcr_repo }}
+          GHCR_REPO_RAW: ghcr.io/${{ github.repository }}
           DATE: ${{ steps.date.outputs.date }}
           HAS_COMMITS: ${{ steps.commits.outputs.has_commits }}
           COMMITS: ${{ steps.commits.outputs.commits }}
         run: |
+          GHCR_REPO=$(echo "$GHCR_REPO_RAW" | tr '[:upper:]' '[:lower:]')
           {
             echo '## Docker Images'
             echo ''

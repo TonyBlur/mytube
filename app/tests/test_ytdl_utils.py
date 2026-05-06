@@ -38,8 +38,10 @@ sys.modules.setdefault("yt_dlp.utils", fake_utils)
 
 from ytdl import (
     DownloadInfo,
+    _codec_suffix_value,
     _compact_persisted_entry,
     _convert_srt_to_txt_file,
+    _quality_suffix_value,
     _resolve_outtmpl_fields,
     _sanitize_entry_for_pickle,
     _sanitize_path_component,
@@ -179,6 +181,74 @@ Second line
             content = Path(txt_path).read_text(encoding="utf-8")
             self.assertIn("Hello world", content)
             self.assertIn("Second line", content)
+
+
+class QualitySuffixValueTests(unittest.TestCase):
+    def _download_info(self, **kwargs):
+        info = DownloadInfo(
+            id="id1",
+            title="t",
+            url="http://example.com/v",
+            quality=kwargs.pop("quality", "best"),
+            download_type=kwargs.pop("download_type", "video"),
+            codec=kwargs.pop("codec", "auto"),
+            format=kwargs.pop("format", "any"),
+            folder="",
+            custom_name_prefix="",
+            error=None,
+            entry=None,
+            playlist_item_limit=0,
+            split_by_chapters=False,
+            chapter_template="",
+        )
+        for key, value in kwargs.items():
+            setattr(info, key, value)
+        return info
+
+    def test_video_best_uses_actual_height_template(self):
+        self.assertEqual(_quality_suffix_value(self._download_info()), "%(height)sp")
+
+    def test_video_numeric_quality_gets_p_suffix(self):
+        self.assertEqual(_quality_suffix_value(self._download_info(quality="2160")), "2160p")
+
+    def test_audio_best_stays_best(self):
+        info = self._download_info(download_type="audio", quality="best")
+        self.assertEqual(_quality_suffix_value(info), "best")
+
+
+class CodecSuffixValueTests(unittest.TestCase):
+    def _download_info(self, **kwargs):
+        return DownloadInfo(
+            id="id1",
+            title="t",
+            url="http://example.com/v",
+            quality="best",
+            download_type="video",
+            codec=kwargs.pop("codec", "auto"),
+            format="any",
+            folder="",
+            custom_name_prefix="",
+            error=None,
+            entry=kwargs.pop("entry", None),
+            playlist_item_limit=0,
+            split_by_chapters=False,
+            chapter_template="",
+        )
+
+    def test_explicit_codec_passes_through(self):
+        self.assertEqual(_codec_suffix_value(self._download_info(codec="h265")), "h265")
+
+    def test_auto_codec_uses_entry_vcodec(self):
+        info = self._download_info(entry={"vcodec": "avc1.640028"})
+        self.assertEqual(_codec_suffix_value(info), "h264")
+
+    def test_auto_codec_uses_requested_formats(self):
+        info = self._download_info(entry={"requested_formats": [{"vcodec": "vp09.00.51.08"}]})
+        self.assertEqual(_codec_suffix_value(info), "vp9")
+
+    def test_unknown_auto_codec_is_sanitized(self):
+        info = self._download_info(entry={"vcodec": "some codec/name"})
+        self.assertEqual(_codec_suffix_value(info), "some_codec_name")
 
 
 class DownloadInfoSetstateTests(unittest.TestCase):

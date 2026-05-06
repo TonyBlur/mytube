@@ -374,6 +374,60 @@ def _download_info_from_record(record: dict[str, Any]) -> DownloadInfo:
         info.error = None
     return info
 
+
+def _quality_suffix_value(dl: DownloadInfo) -> str:
+    quality = str(getattr(dl, 'quality', '') or '')
+    if getattr(dl, 'download_type', '') == 'video':
+        if quality == 'best':
+            return '%(height)sp'
+        if re.fullmatch(r'\d+', quality):
+            return f'{quality}p'
+    return quality
+
+
+def _codec_suffix_value(dl: DownloadInfo) -> str:
+    codec_value = str(getattr(dl, 'codec', '') or '')
+    if codec_value.lower() != 'auto':
+        return codec_value
+
+    entry = getattr(dl, 'entry', None) or {}
+    resolved = None
+    if isinstance(entry, dict):
+        vc = entry.get('vcodec')
+        ac = entry.get('acodec')
+        if vc:
+            resolved = vc
+        elif ac:
+            resolved = ac
+        else:
+            for fld in ('requested_formats', 'formats'):
+                lst = entry.get(fld) or []
+                if isinstance(lst, list):
+                    for it in lst:
+                        if isinstance(it, dict):
+                            if it.get('vcodec'):
+                                resolved = it.get('vcodec')
+                                break
+                            if it.get('acodec'):
+                                resolved = it.get('acodec')
+                                break
+                if resolved:
+                    break
+
+    if not resolved:
+        return codec_value
+
+    resolved_value = str(resolved).lower()
+    if 'avc' in resolved_value or 'h264' in resolved_value:
+        return 'h264'
+    if 'hevc' in resolved_value or 'h265' in resolved_value or 'h.265' in resolved_value:
+        return 'h265'
+    if 'av01' in resolved_value or 'av1' in resolved_value:
+        return 'av1'
+    if 'vp9' in resolved_value or 'vp09' in resolved_value:
+        return 'vp9'
+    return re.sub(r'[^0-9a-zA-Z]+', '_', resolved_value)
+
 class Download:
     manager = None
 
@@ -922,48 +976,12 @@ class DownloadQueue:
         suffix = None
         if not getattr(dl, 'custom_name_prefix', None):
             parts = []
-            if getattr(dl, 'quality', ''):
-                parts.append(str(dl.quality))
-            codec_value = getattr(dl, 'codec', '')
-            if str(codec_value).lower() == 'auto':
-                entry = getattr(dl, 'entry', None) or {}
-                resolved = None
-                if isinstance(entry, dict):
-                    vc = entry.get('vcodec')
-                    ac = entry.get('acodec')
-                    if vc:
-                        resolved = vc
-                    elif ac:
-                        resolved = ac
-                    else:
-                        for fld in ('requested_formats', 'formats'):
-                            lst = entry.get(fld) or []
-                            if isinstance(lst, list):
-                                for it in lst:
-                                    if isinstance(it, dict):
-                                        if it.get('vcodec'):
-                                            resolved = it.get('vcodec')
-                                            break
-                                        if it.get('acodec'):
-                                            resolved = it.get('acodec')
-                                            break
-                            if resolved:
-                                break
-                if resolved:
-                    s = str(resolved).lower()
-                    if 'avc' in s or 'h264' in s:
-                        codec_value = 'h264'
-                    elif 'hevc' in s or 'h265' in s or 'h.265' in s:
-                        codec_value = 'h265'
-                    elif 'av01' in s or 'av1' in s:
-                        codec_value = 'av1'
-                    elif 'vp9' in s or 'vp09' in s:
-                        codec_value = 'vp9'
-                    else:
-                        codec_value = re.sub(r'[^0-9a-zA-Z]+', '_', s)
-
-            if codec_value:
-                parts.append(str(codec_value))
+            quality_suffix = _quality_suffix_value(dl)
+            if quality_suffix:
+                parts.append(quality_suffix)
+            codec_suffix = _codec_suffix_value(dl)
+            if codec_suffix:
+                parts.append(codec_suffix)
             if parts:
                 suffix = '_'.join(_sanitize_path_component(p) for p in parts if p)
 
