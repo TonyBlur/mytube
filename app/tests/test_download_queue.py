@@ -247,7 +247,7 @@ async def test_start_paused_download_reschedules_it(dq_env):
     download = dq.queue.get(url)
     assert download.paused is False
     assert download.info.status == "pending"
-    start_mock.assert_called_once_with(download, download.start_generation)
+    start_mock.assert_called_once_with(download)
 
 
 @pytest.mark.asyncio
