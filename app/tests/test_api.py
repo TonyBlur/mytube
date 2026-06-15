@@ -312,6 +312,7 @@ async def test_add_passes_clip_bounds_to_queue(mock_dqueue):
 
 @pytest.mark.asyncio
 async def test_subscribe_rejects_clip_options(mock_dqueue, monkeypatch):
+    monkeypatch.setattr(main.config, 'PUBLIC_MODE', False)
     monkeypatch.setattr(main.submgr, "add_subscription", AsyncMock())
     req = _json_request(
         {
