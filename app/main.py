@@ -515,23 +515,30 @@ def _forget_public_download(url: str | None = None, *, dl_id: str | None = None,
 def _get_public_history(visit_id: str):
     """Return (active_items, done_items) for *visit_id* in the same format
     as ``dqueue.get()``: ``([(key, DownloadInfo), ...], [(key, DownloadInfo), ...])``.
-    Only downloads whose URL is registered to *visit_id* are included.
+    Only downloads whose URL is owned by *visit_id* are included.
     """
     urls = public_visit_downloads.get(visit_id, set())
     if not urls:
         return ([], [])
 
+    def _owned_by_visit(info) -> bool:
+        """Check that this visit actually owns the download, not just
+        that the URL happens to be in the visit's URL set.  Two different
+        visitors may add the same URL, and ``public_download_owner`` maps
+        a URL to exactly one visit — the one that most recently added it."""
+        return public_download_owner.get(info.url) == visit_id
+
     active = []
     for key, info in dqueue.queue.saved_items():
-        if info.url in urls:
+        if _owned_by_visit(info):
             active.append((key, info))
     for key, info in dqueue.pending.saved_items():
-        if info.url in urls:
+        if _owned_by_visit(info):
             active.append((key, info))
 
     done = []
     for key, info in dqueue.done.saved_items():
-        if info.url in urls:
+        if _owned_by_visit(info):
             done.append((key, info))
 
     return (active, done)

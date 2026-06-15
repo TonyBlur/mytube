@@ -1244,6 +1244,7 @@ class DownloadQueue:
         info.error = None
         info.msg = None
         await self.notifier.updated(info)
+        download.start_generation += 1
         asyncio.create_task(self.__start_download(download))
 
     def _schedule_upcoming_download(self, download: Download) -> None:
@@ -1256,13 +1257,18 @@ class DownloadQueue:
         download.info.status = 'pending'
         download.info.error = None
         download.info.msg = None
+        download.start_generation += 1
         asyncio.create_task(self.__start_download(download))
 
     async def __start_download(self, download):
+        gen = download.start_generation
         if download.canceled:
             log.info(f"Download {download.info.title} was canceled, skipping start.")
             return
         async with self.semaphore:
+            if gen != download.start_generation:
+                log.info(f"Download {download.info.title} was superseded, skipping start.")
+                return
             if download.canceled or download.paused:
                 log.info(f"Download {download.info.title} was canceled or paused, skipping start.")
                 return
@@ -1438,6 +1444,7 @@ class DownloadQueue:
                 self._schedule_upcoming_download(download)
             else:
                 self.queue.put(download)
+                download.start_generation += 1
                 asyncio.create_task(self.__start_download(download))
         else:
             self.pending.put(download)
@@ -1715,6 +1722,7 @@ class DownloadQueue:
                     self._schedule_upcoming_download(dl)
                 else:
                     self.queue.put(dl)
+                    dl.start_generation += 1
                     asyncio.create_task(self.__start_download(dl))
                 continue
             if self.queue.exists(id):
@@ -1725,6 +1733,7 @@ class DownloadQueue:
                     dl.info.speed = None
                     dl.info.eta = None
                     self.queue.put(dl)
+                    dl.start_generation += 1
                     asyncio.create_task(self.__start_download(dl))
                     continue
                 if dl.info.status == 'scheduled':
