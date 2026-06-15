@@ -1571,31 +1571,32 @@ class DownloadQueue:
             if key in self._canceled_urls:
                 log.info(f'Skipping canceled URL: {entry.get("title") or key}')
                 return {'status': 'ok'}
-            if not self.queue.exists(key):
-                dl = DownloadInfo(
-                    id=entry['id'],
-                    title=entry.get('title') or entry['id'],
-                    url=key,
-                    quality=quality,
-                    download_type=download_type,
-                    codec=codec,
-                    format=format,
-                    folder=folder,
-                    custom_name_prefix=custom_name_prefix,
-                    error=error,
-                    entry=entry,
-                    playlist_item_limit=playlist_item_limit,
-                    split_by_chapters=split_by_chapters,
-                    chapter_template=chapter_template,
-                    subtitle_language=subtitle_language,
-                    subtitle_mode=subtitle_mode,
-                    ytdl_options_presets=ytdl_options_presets,
-                    ytdl_options_overrides=ytdl_options_overrides,
-                    clip_start=clip_start,
-                    clip_end=clip_end,
-                    live_status=entry.get('live_status'),
-                    live_release_timestamp=entry.get('release_timestamp'),
-                )
+            dl = DownloadInfo(
+                id=entry['id'],
+                title=entry.get('title') or entry['id'],
+                url=key,
+                quality=quality,
+                download_type=download_type,
+                codec=codec,
+                format=format,
+                folder=folder,
+                custom_name_prefix=custom_name_prefix,
+                error=error,
+                entry=entry,
+                playlist_item_limit=playlist_item_limit,
+                split_by_chapters=split_by_chapters,
+                chapter_template=chapter_template,
+                subtitle_language=subtitle_language,
+                subtitle_mode=subtitle_mode,
+                ytdl_options_presets=ytdl_options_presets,
+                ytdl_options_overrides=ytdl_options_overrides,
+                clip_start=clip_start,
+                clip_end=clip_end,
+                live_status=entry.get('live_status'),
+                live_release_timestamp=entry.get('release_timestamp'),
+            )
+            dl.key = self._download_key(dl)
+            if not self.queue.exists(dl.key):
                 await self.__add_download(dl, auto_start)
             return {'status': 'ok'}
         return {'status': 'error', 'msg': f'Unsupported resource "{etype}"'}
@@ -1753,7 +1754,6 @@ class DownloadQueue:
             if not self.queue.exists(id):
                 log.warning(f'requested cancel for non-existent download {id}')
                 continue
-            dl = self.queue.get(id)
             dl = self.queue.get(id)
             if getattr(dl.info, 'status', None) == 'paused' or dl.paused:
                 dl.cancel()
