@@ -1596,7 +1596,7 @@ class DownloadQueue:
                 live_release_timestamp=entry.get('release_timestamp'),
             )
             dl.key = self._download_key(dl)
-            if not self.queue.exists(dl.key):
+            if not self.queue.exists(dl.key) and not self.pending.exists(dl.key):
                 await self.__add_download(dl, auto_start)
             return {'status': 'ok'}
         return {'status': 'error', 'msg': f'Unsupported resource "{etype}"'}
