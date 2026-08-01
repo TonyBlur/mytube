@@ -11,13 +11,22 @@ import time
 import types
 import uuid
 from dataclasses import dataclass, field, fields
+from functools import partial
 from typing import Any, Optional
 
 import yt_dlp
 import yt_dlp.networking.impersonate
+import bg_tasks
+from dl_formats import merge_ytdl_option_layers
 from state_store import AtomicJsonStore, read_legacy_shelf
+from url_guard import validate_url
 
 log = logging.getLogger("subscriptions")
+
+# How many subscription feeds to scan at once. Bounded so one slow/hung feed
+# doesn't serialize the rest, without bursting a large subscription list at the
+# extractor (which risks rate-limiting / bot detection).
+_MAX_CONCURRENT_CHECKS = 4
 
 VIDEO_ONLY_MSG = (
     "This URL points to a single video, not a channel or playlist. Use Download instead."
@@ -42,7 +51,9 @@ def _impersonate_opt(ytdl_options: dict) -> dict:
     return opts
 
 
-def _build_ydl_params(config, *, playlistend: Optional[int] = None) -> dict:
+def _build_ydl_params(
+    config, *, playlistend: Optional[int] = None, extra_opts: Optional[dict[str, Any]] = None
+) -> dict:
     params: dict[str, Any] = {
         "quiet": not logging.getLogger().isEnabledFor(logging.DEBUG),
         "verbose": logging.getLogger().isEnabledFor(logging.DEBUG),
@@ -52,6 +63,13 @@ def _build_ydl_params(config, *, playlistend: Optional[int] = None) -> dict:
         "lazy_playlist": True,
         "paths": {"home": config.DOWNLOAD_DIR, "temp": config.TEMP_DIR},
         **config.YTDL_OPTIONS,
+        **(extra_opts or {}),
+        # A scan is a poll, not an add: it runs on a timer and queues items
+        # through the download queue, which writes the feed metadata itself.
+        # yt-dlp emits the playlist-level infojson/description/thumbnail
+        # regardless of `download`, so without this a writeinfojson user would
+        # get those files rewritten on every check interval. See issue #1040.
+        "allow_playlist_files": False,
     }
     params = _impersonate_opt(params)
     if playlistend is not None and playlistend > 0:
@@ -76,9 +94,11 @@ def _is_media_entry(entry: Any) -> bool:
     return True
 
 
-def extract_flat_playlist(config, url: str, playlistend: int, *, _depth: int = 0):
+def extract_flat_playlist(
+    config, url: str, playlistend: int, *, extra_opts: Optional[dict[str, Any]] = None, _depth: int = 0
+):
     """Return (info_dict, entries_list) for playlist/channel URLs."""
-    params = _build_ydl_params(config, playlistend=playlistend)
+    params = _build_ydl_params(config, playlistend=playlistend, extra_opts=extra_opts)
     with yt_dlp.YoutubeDL(params=params) as ydl:
         info = ydl.extract_info(url, download=False)
     if not info:
@@ -100,10 +120,14 @@ def extract_flat_playlist(config, url: str, playlistend: int, *, _depth: int = 0
                 nested_url = _entry_video_url(ent)
                 if not nested_url:
                     continue
+                # nested_url comes from remote playlist content; guard it too.
+                if validate_url(nested_url, allow_private=getattr(config, "ALLOW_PRIVATE_ADDRESSES", False)) is not None:
+                    continue
                 nested_info, nested_entries = extract_flat_playlist(
                     config,
                     nested_url,
                     playlistend,
+                    extra_opts=extra_opts,
                     _depth=_depth + 1,
                 )
                 if nested_entries:
@@ -269,6 +293,24 @@ def validate_title_regex(value: Any) -> str:
     return s
 
 
+# The name is a display label the user picks; it is persisted and broadcast to
+# every connected client, so keep it a bounded single-line string.
+SUBSCRIPTION_NAME_MAX_LENGTH = 200
+
+
+def validate_subscription_name(value: Any) -> str:
+    """Return a stored subscription name, or raise ValueError if unusable."""
+    if not isinstance(value, str):
+        raise ValueError("name must be a string")
+    # Collapse newlines/tabs so a pasted title can't break the table layout.
+    name = " ".join(value.split())
+    if not name:
+        raise ValueError("name must not be empty")
+    if len(name) > SUBSCRIPTION_NAME_MAX_LENGTH:
+        raise ValueError(f"name must be at most {SUBSCRIPTION_NAME_MAX_LENGTH} characters")
+    return name
+
+
 def _coerce_bool(value: Any) -> bool:
     """Accept JSON booleans and common string forms used by API clients."""
     if isinstance(value, bool):
@@ -312,6 +354,7 @@ class SubscriptionManager:
         self._subs: dict[str, SubscriptionInfo] = {}
         self._url_index: dict[str, str] = {}  # normalized url -> id
         self._pending_urls: set[str] = set()
+        self._checks_in_flight: set[str] = set()  # subscription ids being checked right now
         self._lock = asyncio.Lock()
         self._loop_task: Optional[asyncio.Task] = None
         self._load_all()
@@ -368,6 +411,23 @@ class SubscriptionManager:
 
     def _save_locked(self) -> None:
         self._store.save({"items": [_subscription_to_record(sub) for sub in self._subs.values()]})
+
+    def _scan_extra_opts(
+        self,
+        ytdl_options_presets: Optional[list[str]],
+        ytdl_options_overrides: Optional[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Merge configured presets (in order) with per-subscription overrides.
+
+        Applied on top of the global YTDL_OPTIONS when scanning a
+        subscription's feed, so cookies/impersonation/etc. configured via a
+        preset or override also take effect during the flat-playlist scan,
+        not just the eventual per-video download. (The global YTDL_OPTIONS base
+        is already spread into the scan params by ``_build_ydl_params``.)
+        """
+        return merge_ytdl_option_layers(
+            ytdl_options_presets, ytdl_options_overrides, self.config.YTDL_OPTIONS_PRESETS
+        )
 
     async def _queue_subscription_entries(
         self,
@@ -435,12 +495,8 @@ class SubscriptionManager:
     def start_background_loop(self) -> None:
         if self._loop_task is not None and not self._loop_task.done():
             return
-        self._loop_task = asyncio.create_task(self._periodic_loop())
-        self._loop_task.add_done_callback(
-            lambda t: log.error("Subscription loop failed: %s", t.exception())
-            if not t.cancelled() and t.exception()
-            else None
-        )
+        # bg_tasks.create_task already logs unexpected task failures with the name.
+        self._loop_task = bg_tasks.create_task(self._periodic_loop(), name="subscription_loop")
 
     async def _periodic_loop(self) -> None:
         while True:
@@ -464,8 +520,30 @@ class SubscriptionManager:
                 if now - sub.last_checked < interval_sec:
                     continue
                 due.append(sub)
-        for sub in due:
-            await self._check_one_unlocked(sub)
+        await self._check_many(due)
+
+    async def _check_many(self, subs: list[SubscriptionInfo]) -> None:
+        """Check subscriptions with bounded concurrency so one slow feed does
+        not serialize the rest. Failures are isolated per subscription."""
+        if not subs:
+            return
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_CHECKS)
+
+        async def _guarded(sub: SubscriptionInfo) -> None:
+            async with sem:
+                await self._check_one_unlocked(sub)
+
+        results = await asyncio.gather(
+            *(_guarded(sub) for sub in subs), return_exceptions=True
+        )
+        for sub, result in zip(subs, results):
+            if isinstance(result, Exception):
+                log.error(
+                    "Subscription check crashed for %s: %s",
+                    sub.name,
+                    result,
+                    exc_info=result,
+                )
 
     async def add_subscription(
         self,
@@ -492,6 +570,13 @@ class SubscriptionManager:
         url = self._normalize_url(url)
         if not url:
             return {"status": "error", "msg": "Missing URL"}
+        # SSRF guard: block non-http(s) schemes and internal/metadata hosts
+        # before yt-dlp fetches the feed. May do a DNS lookup, so run off-loop.
+        url_error = await asyncio.get_running_loop().run_in_executor(
+            None, partial(validate_url, url, allow_private=getattr(self.config, "ALLOW_PRIVATE_ADDRESSES", False)))
+        if url_error is not None:
+            log.warning('Rejected subscription URL "%s": %s', url, url_error)
+            return {"status": "error", "msg": url_error}
         try:
             title_regex_stored = validate_title_regex(title_regex)
         except re.error as exc:
@@ -512,8 +597,12 @@ class SubscriptionManager:
 
         try:
             scan_first = max(int(getattr(self.config, "SUBSCRIPTION_SCAN_PLAYLIST_END", 50)), 1)
+            scan_extra_opts = self._scan_extra_opts(ytdl_options_presets, ytdl_options_overrides)
             try:
-                info, entries = extract_flat_playlist(self.config, url, scan_first)
+                info, entries = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    partial(extract_flat_playlist, self.config, url, scan_first, extra_opts=scan_extra_opts),
+                )
             except yt_dlp.utils.YoutubeDLError as exc:
                 return {"status": "error", "msg": str(exc)}
 
@@ -609,6 +698,13 @@ class SubscriptionManager:
         return {"status": "ok"}
 
     async def update_subscription(self, sub_id: str, changes: dict) -> dict:
+        validated_name: Optional[str] = None
+        if "name" in changes:
+            try:
+                validated_name = validate_subscription_name(changes["name"])
+            except ValueError as exc:
+                return {"status": "error", "msg": str(exc)}
+
         validated_tr: Optional[str] = None
         if "title_regex" in changes:
             try:
@@ -628,6 +724,24 @@ class SubscriptionManager:
             except ValueError as exc:
                 return {"status": "error", "msg": str(exc)}
 
+        enabled_set = False
+        validated_enabled = False
+        if "enabled" in changes:
+            try:
+                validated_enabled = _coerce_bool(changes["enabled"])
+                enabled_set = True
+            except ValueError as exc:
+                return {"status": "error", "msg": str(exc)}
+
+        interval_set = False
+        validated_interval = 0
+        if "check_interval_minutes" in changes:
+            try:
+                validated_interval = max(1, int(changes["check_interval_minutes"]))
+            except (TypeError, ValueError):
+                return {"status": "error", "msg": "check_interval_minutes must be an integer"}
+            interval_set = True
+
         async with self._lock:
             sub = self._subs.get(sub_id)
             if not sub:
@@ -635,12 +749,12 @@ class SubscriptionManager:
             previous = copy.deepcopy(sub)
             old_enabled = sub.enabled
 
-            if "enabled" in changes:
-                sub.enabled = _coerce_bool(changes["enabled"])
-            if "check_interval_minutes" in changes:
-                sub.check_interval_minutes = max(1, int(changes["check_interval_minutes"]))
-            if "name" in changes and changes["name"]:
-                sub.name = str(changes["name"])
+            if enabled_set:
+                sub.enabled = validated_enabled
+            if interval_set:
+                sub.check_interval_minutes = validated_interval
+            if validated_name is not None:
+                sub.name = validated_name
             if validated_tr is not None:
                 sub.title_regex = validated_tr
             if skip_so_set:
@@ -672,22 +786,45 @@ class SubscriptionManager:
             "Manual subscription check requested for %d subscription(s)",
             len(targets),
         )
-        for sub in targets:
-            await self._check_one_unlocked(sub)
+        await self._check_many(targets)
         return {"status": "ok"}
 
     async def _check_one_unlocked(self, sub: SubscriptionInfo) -> None:
         sid = sub.id
+        # Prevent overlapping checks for the same subscription (e.g. the periodic
+        # loop and a manual check-now firing together), which could double-queue
+        # entries and drop seen_ids via a read-modify-write race.
+        async with self._lock:
+            if sid in self._checks_in_flight:
+                log.info("Subscription check already in progress for %s, skipping", sub.name)
+                return
+            self._checks_in_flight.add(sid)
+        try:
+            await self._check_one_inner(sub)
+        finally:
+            async with self._lock:
+                self._checks_in_flight.discard(sid)
+
+    async def _check_one_inner(self, sub: SubscriptionInfo) -> None:
+        sid = sub.id
         scan = int(getattr(self.config, "SUBSCRIPTION_SCAN_PLAYLIST_END", 50))
+        # ytdl_options_presets/overrides are set at subscription creation and
+        # never mutated afterwards (update_subscription doesn't allow it), so
+        # reading them off `sub` here without holding the lock is safe.
+        scan_extra_opts = self._scan_extra_opts(sub.ytdl_options_presets, sub.ytdl_options_overrides)
         log.info("Checking subscription: %s", sub.name)
         try:
-            info, entries = extract_flat_playlist(self.config, sub.url, scan)
+            info, entries = await asyncio.get_running_loop().run_in_executor(
+                None,
+                partial(extract_flat_playlist, self.config, sub.url, scan, extra_opts=scan_extra_opts),
+            )
         except yt_dlp.utils.YoutubeDLError as exc:
             async with self._lock:
                 cur = self._subs.get(sid)
                 if cur:
                     previous = copy.deepcopy(cur)
                     cur.error = str(exc)
+                    cur.last_checked = time.time()
                     try:
                         self._save_locked()
                     except Exception:
@@ -700,12 +837,13 @@ class SubscriptionManager:
         entries = [ent for ent in entries if _is_media_entry(ent)]
 
         etype = (info or {}).get("_type") or "video"
-        if etype == "video" or not entries:
+        if etype == "video":
             async with self._lock:
                 cur = self._subs.get(sid)
                 if cur:
                     previous = copy.deepcopy(cur)
                     cur.error = VIDEO_ONLY_MSG
+                    cur.last_checked = time.time()
                     try:
                         self._save_locked()
                     except Exception:
@@ -713,6 +851,22 @@ class SubscriptionManager:
                         raise
                     sub = cur
             log.warning("Subscription %s no longer resolves to a subscribable feed", sub.name)
+            await self.notifier.subscription_updated(sub)
+            return
+        if not entries:
+            async with self._lock:
+                cur = self._subs.get(sid)
+                if cur:
+                    previous = copy.deepcopy(cur)
+                    cur.last_checked = time.time()
+                    cur.error = None
+                    try:
+                        self._save_locked()
+                    except Exception:
+                        self._subs[sid] = previous
+                        raise
+                    sub = cur
+            log.warning("Subscription check finished for %s: No entries found", sub.name)
             await self.notifier.subscription_updated(sub)
             return
 
@@ -744,6 +898,10 @@ class SubscriptionManager:
             eid = _entry_id(ent)
             if not eid:
                 continue
+            # Seen entries that are currently live are deliberately re-queued:
+            # a stream first seen as 'upcoming' must still be captured once it
+            # goes live. The download queue dedups by URL while a capture is
+            # in flight, so this can't double-queue an active capture.
             if eid in seen and ent.get("live_status") != "is_live":
                 continue
             new_entries.append(ent)

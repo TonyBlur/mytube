@@ -16,9 +16,11 @@ import logging
 import json
 import pathlib
 import re
+import time
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from watchfiles import DefaultFilter, Change, awatch
 
+import bg_tasks
 from ytdl import DownloadQueueNotifier, DownloadQueue, Download
 from subscriptions import SubscriptionManager, SubscriptionNotifier, SubscriptionInfo, coerce_optional_bool
 from yt_dlp.version import __version__ as yt_dlp_version
@@ -79,6 +81,7 @@ class Config:
         'YTDL_OPTIONS_PRESETS': '{}',
         'YTDL_OPTIONS_PRESETS_FILE': '',
         'ALLOW_YTDL_OPTIONS_OVERRIDES': 'false',
+        'ALLOW_PRIVATE_ADDRESSES': 'false',
         'CORS_ALLOWED_ORIGINS': '',
         'ROBOTS_TXT': '',
         'HOST': '0.0.0.0',
@@ -95,7 +98,7 @@ class Config:
         'PUBLIC_MODE': 'false',
     }
 
-    _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'HTTPS', 'ENABLE_ACCESSLOG', 'ALLOW_YTDL_OPTIONS_OVERRIDES', 'PUBLIC_MODE')
+    _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'HTTPS', 'ENABLE_ACCESSLOG', 'ALLOW_YTDL_OPTIONS_OVERRIDES', 'ALLOW_PRIVATE_ADDRESSES', 'PUBLIC_MODE')
 
     def __init__(self):
         for k, v in self._DEFAULTS.items():
@@ -112,6 +115,13 @@ class Config:
 
         if not self.URL_PREFIX.endswith('/'):
             self.URL_PREFIX += '/'
+
+        # A blank PUBLIC_HOST_AUDIO_URL (e.g. set empty in a compose file) bypasses the
+        # default via os.environ.get, which would leave audio links root-relative and 404.
+        # Fall back to the 'audio_download/' route that serves AUDIO_DOWNLOAD_DIR. When
+        # PUBLIC_HOST_URL is also blank we leave it blank to preserve serving from web root.
+        if not self.PUBLIC_HOST_AUDIO_URL and self.PUBLIC_HOST_URL:
+            self.PUBLIC_HOST_AUDIO_URL = self._DEFAULTS['PUBLIC_HOST_AUDIO_URL']
 
         for attr in ('PUBLIC_HOST_URL', 'PUBLIC_HOST_AUDIO_URL'):
             val = getattr(self, attr)
@@ -131,6 +141,14 @@ class Config:
             )
             sys.exit(1)
 
+        self._validate_int('MAX_CONCURRENT_DOWNLOADS', minimum=1)
+        self._validate_int('PORT', minimum=1, maximum=65535)
+        self._validate_int('CLEAR_COMPLETED_AFTER', minimum=0)
+        self._validate_int('DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT', minimum=0)
+        self._validate_int('SUBSCRIPTION_DEFAULT_CHECK_INTERVAL', minimum=1)
+        self._validate_int('SUBSCRIPTION_SCAN_PLAYLIST_END', minimum=1)
+        self._validate_int('SUBSCRIPTION_MAX_SEEN_IDS', minimum=1)
+
         self._runtime_overrides = {}
 
         success,_ = self.load_ytdl_options()
@@ -138,6 +156,20 @@ class Config:
             sys.exit(1)
         success,_ = self.load_ytdl_option_presets()
         if not success:
+            sys.exit(1)
+
+    def _validate_int(self, key, *, minimum=None, maximum=None):
+        raw = getattr(self, key)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            log.error('Environment variable "%s" must be an integer, got "%s"', key, raw)
+            sys.exit(1)
+        if minimum is not None and value < minimum:
+            log.error('Environment variable "%s" must be >= %d, got "%s"', key, minimum, raw)
+            sys.exit(1)
+        if maximum is not None and value > maximum:
+            log.error('Environment variable "%s" must be <= %d, got "%s"', key, maximum, raw)
             sys.exit(1)
 
     def set_runtime_override(self, key, value):
@@ -243,7 +275,13 @@ logging.getLogger().setLevel(parseLogLevel(str(config.LOGLEVEL)) or logging.INFO
 
 class ObjectSerializer(json.JSONEncoder):
     def default(self, obj):
-        # First try to use __dict__ for custom objects
+        # Prefer an explicit client-facing view when the object provides one
+        # (e.g. DownloadInfo / SubscriptionInfo) so server-only or bulky fields
+        # are never broadcast to browser clients.
+        to_public = getattr(obj, 'to_public_dict', None)
+        if callable(to_public):
+            return to_public()
+        # Fall back to __dict__ for other custom objects
         if hasattr(obj, '__dict__'):
             return obj.__dict__
         # Convert iterables (generators, dict_items, etc.) to lists
@@ -257,7 +295,33 @@ class ObjectSerializer(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 serializer = ObjectSerializer()
-app = web.Application()
+
+_STATE_DIR_REAL = os.path.realpath(config.STATE_DIR)
+
+
+def _is_within_state_dir(real_target: str) -> bool:
+    return real_target == _STATE_DIR_REAL or real_target.startswith(_STATE_DIR_REAL + os.sep)
+
+
+@web.middleware
+async def state_dir_guard(request, handler):
+    for prefix, base in (
+        (config.URL_PREFIX + 'download/', config.DOWNLOAD_DIR),
+        (config.URL_PREFIX + 'audio_download/', config.AUDIO_DOWNLOAD_DIR),
+    ):
+        if request.path.startswith(prefix):
+            # request.path is already percent-decoded by aiohttp; decoding it
+            # again would mangle a download whose filename contains a literal
+            # '%' (e.g. "%" turning into a truncated escape) into a false 404.
+            rel = request.path[len(prefix):]
+            target = os.path.realpath(os.path.join(base, rel))
+            if _is_within_state_dir(target):
+                raise web.HTTPNotFound()
+            break
+    return await handler(request)
+
+
+app = web.Application(middlewares=[state_dir_guard])
 _cors_origins = [o.strip() for o in config.CORS_ALLOWED_ORIGINS.split(',') if o.strip()] if config.CORS_ALLOWED_ORIGINS else []
 sio = socketio.AsyncServer(cors_allowed_origins=_cors_origins if _cors_origins else [])
 sio.attach(app, socketio_path=config.URL_PREFIX + 'socket.io')
@@ -373,11 +437,19 @@ def _clip_field_provided_in_post(raw) -> bool:
 
 
 def _extract_t_query_from_url(url: str) -> tuple[str, float | None]:
-    """If ``t=`` is present and parseable, return URL without ``t`` and start seconds."""
+    """If ``t=`` is present and parseable, return URL without ``t`` and start seconds.
+
+    Restricted to YouTube hosts: ``t`` is a generic query parameter name that
+    other sites may use for unrelated purposes, so rewriting it there would
+    silently mutate the URL and inject a bogus clip start.
+    """
     try:
         parsed = urlparse(url)
         params = parse_qs(parsed.query)
     except Exception:
+        return url, None
+    host = (parsed.hostname or '').lower()
+    if not (host in ('youtu.be', 'youtube.com') or host.endswith('.youtube.com')):
         return url, None
     t_values = params.get('t')
     if not t_values:
@@ -621,6 +693,7 @@ async def _download_queue_startup(app):
 
 
 async def _shutdown_download_manager(app):
+    dqueue.close()
     Download.shutdown_manager()
 
 
@@ -676,7 +749,7 @@ async def _schedule_nightly_update() -> None:
 
 
 async def _start_nightly_update_schedule(app):
-    asyncio.create_task(_schedule_nightly_update())
+    bg_tasks.create_task(_schedule_nightly_update(), name="nightly_update_schedule")
 
 
 app.on_startup.append(_start_nightly_update_schedule)
@@ -725,7 +798,7 @@ async def watch_files():
             await sio.emit('ytdl_options_changed', serializer.encode(result))
 
     log.info(f'Starting Watch File: {config.YTDL_OPTIONS_FILE}')
-    asyncio.create_task(_watch_files())
+    bg_tasks.create_task(_watch_files(), name="watch_ytdl_options_file")
 
 async def _watch_files_startup(app):
     await watch_files()
@@ -768,8 +841,6 @@ def parse_download_options(post: dict) -> dict:
 
     if custom_name_prefix is None:
         custom_name_prefix = ''
-    if custom_name_prefix and ('..' in custom_name_prefix or custom_name_prefix.startswith('/') or custom_name_prefix.startswith('\\')):
-        raise web.HTTPBadRequest(reason='custom_name_prefix must not contain ".." or start with a path separator')
     if auto_start is None:
         auto_start = True
     if playlist_item_limit is None:
@@ -794,8 +865,6 @@ def parse_download_options(post: dict) -> dict:
         enabled=config.ALLOW_YTDL_OPTIONS_OVERRIDES,
     )
 
-    if chapter_template and ('..' in chapter_template or chapter_template.startswith('/') or chapter_template.startswith('\\')):
-        raise web.HTTPBadRequest(reason='chapter_template must not contain ".." or start with a path separator')
     if not SUBTITLE_LANGUAGE_RE.fullmatch(subtitle_language):
         raise web.HTTPBadRequest(reason='subtitle_language must match pattern [A-Za-z0-9-] and be at most 35 characters')
     if subtitle_mode not in VALID_SUBTITLE_MODES:
@@ -968,15 +1037,23 @@ async def cancel_add(request):
     return web.Response(text=serializer.encode({'status': 'ok'}), content_type='application/json')
 
 
+@routes.post(config.URL_PREFIX + 'retry')
+async def retry(request):
+    # Singular by design, unlike the 'ids' batch endpoints: a retry re-extracts
+    # the URL, so it can fail per item, and the caller removes that item's done
+    # record only once it is confirmed re-queued. A batch form would have to
+    # report per-id results for the caller to know which ones to remove.
+    post = await _read_json_request(request)
+    status = await dqueue.retry(_require_id(post))
+    return web.Response(text=serializer.encode(status), content_type='application/json')
+
+
 @routes.post(config.URL_PREFIX + 'subscribe')
 async def subscribe(request):
     if config.PUBLIC_MODE:
         raise web.HTTPForbidden(reason='subscriptions are disabled in public mode')
     post = await _read_json_request(request)
-    try:
-        o = parse_download_options(post)
-    except web.HTTPBadRequest:
-        raise
+    o = parse_download_options(post)
     cic = post.get('check_interval_minutes')
     if cic is None:
         cic = config.SUBSCRIPTION_DEFAULT_CHECK_INTERVAL
@@ -1073,13 +1150,27 @@ async def subscriptions_check(request):
     result = await submgr.check_now([str(i) for i in ids] if ids else None)
     return web.Response(text=serializer.encode(result))
 
+def _require_id(post: dict) -> str:
+    id = post.get('id')
+    if not isinstance(id, str) or not id:
+        raise web.HTTPBadRequest(reason="'id' must be a non-empty string")
+    return id
+
+
+def _require_id_list(post: dict) -> list:
+    ids = post.get('ids')
+    if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+        raise web.HTTPBadRequest(reason="'ids' must be a non-empty list of strings")
+    return ids
+
+
 @routes.post(config.URL_PREFIX + 'delete')
 async def delete(request):
     post = await _read_json_request(request)
-    ids = post.get('ids')
+    ids = _require_id_list(post)
     where = post.get('where')
-    if not ids or where not in ['queue', 'done']:
-        log.error("Bad request: missing 'ids' or incorrect 'where' value")
+    if where not in ['queue', 'done']:
+        log.error("Bad request: incorrect 'where' value")
         raise web.HTTPBadRequest()
     status = await (dqueue.cancel(ids) if where == 'queue' else dqueue.clear(ids))
     log.info(f"Download delete request processed for ids: {ids}, where: {where}")
@@ -1088,7 +1179,7 @@ async def delete(request):
 @routes.post(config.URL_PREFIX + 'start')
 async def start(request):
     post = await _read_json_request(request)
-    ids = post.get('ids')
+    ids = _require_id_list(post)
     log.info(f"Received request to start pending downloads for ids: {ids}")
     status = await dqueue.start_pending(ids)
     return web.Response(text=serializer.encode(status))
@@ -1128,6 +1219,12 @@ async def upload_cookies(request):
     tmp_cookie_path = f"{COOKIES_PATH}.tmp"
     with open(tmp_cookie_path, 'wb') as f:
         f.write(content)
+    # Cookies are sensitive auth material; restrict to owner read/write only
+    # (the container's default umask would otherwise leave them group/world readable).
+    try:
+        os.chmod(tmp_cookie_path, 0o600)
+    except OSError as exc:
+        log.warning(f'Could not restrict permissions on cookies file: {exc}')
     os.replace(tmp_cookie_path, COOKIES_PATH)
     config.set_runtime_override('cookiefile', COOKIES_PATH)
     log.info(f'Cookies file uploaded ({size} bytes)')
@@ -1178,12 +1275,16 @@ async def history(request):
         history = {'done': [v for _, v in done], 'queue': [v for _, v in active], 'pending': []}
     else:
         history = { 'done': [], 'queue': [], 'pending': []}
-        for _, v in dqueue.queue.saved_items():
-            history['queue'].append(v)
-        for _, v in dqueue.done.saved_items():
-            history['done'].append(v)
-        for _, v in dqueue.pending.saved_items():
-            history['pending'].append(v)
+
+        # Served from the in-memory queues (like the socket 'all' event) rather
+        # than saved_items(), which reloads and re-compacts the on-disk state on
+        # every call.
+        for _, v in dqueue.queue.items():
+            history['queue'].append(v.info)
+        for _, v in dqueue.done.items():
+            history['done'].append(v.info)
+        for _, v in dqueue.pending.items():
+            history['pending'].append(v.info)
 
     log.info("Sending download history")
     return web.Response(text=serializer.encode(history))
@@ -1208,7 +1309,11 @@ async def connect(sid, environ):
         await sio.emit('subscriptions_all', serializer.encode([s.to_public_dict() for s in submgr.list_all()]), to=sid)
     await sio.emit('configuration', serializer.encode(config.frontend_safe()), to=sid)
     if config.CUSTOM_DIRS:
-        await sio.emit('custom_dirs', serializer.encode(get_custom_dirs()), to=sid)
+        # get_custom_dirs() can walk the whole download tree on a cache miss;
+        # keep that off the event loop so a large library doesn't stall every
+        # client's connect handshake.
+        dirs = await asyncio.get_running_loop().run_in_executor(None, get_custom_dirs)
+        await sio.emit('custom_dirs', serializer.encode(dirs), to=sid)
     if config.YTDL_OPTIONS_FILE:
         await sio.emit('ytdl_options_changed', serializer.encode(get_options_update_time()), to=sid)
 
@@ -1235,7 +1340,7 @@ async def disconnect(sid):
 
 def get_custom_dirs():
     cache_ttl_seconds = 5
-    now = asyncio.get_running_loop().time()
+    now = time.monotonic()
     cache_key = (
         config.DOWNLOAD_DIR,
         config.AUDIO_DOWNLOAD_DIR,
@@ -1345,6 +1450,7 @@ async def add_cors(request):
 
 app.router.add_route('OPTIONS', config.URL_PREFIX + 'add', add_cors)
 app.router.add_route('OPTIONS', config.URL_PREFIX + 'cancel-add', add_cors)
+app.router.add_route('OPTIONS', config.URL_PREFIX + 'retry', add_cors)
 app.router.add_route('OPTIONS', config.URL_PREFIX + 'subscribe', add_cors)
 app.router.add_route('OPTIONS', config.URL_PREFIX + 'subscriptions', add_cors)
 app.router.add_route('OPTIONS', config.URL_PREFIX + 'subscriptions/update', add_cors)

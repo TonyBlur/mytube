@@ -51,6 +51,19 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(c.PUBLIC_HOST_URL, "")
         self.assertEqual(c.PUBLIC_HOST_AUDIO_URL, "")
 
+    def test_blank_audio_host_falls_back_to_audio_download_route(self):
+        # Regression: a present-but-blank PUBLIC_HOST_AUDIO_URL must not stay empty
+        # (which produced root-relative, 404ing audio links). It falls back to the
+        # 'audio_download/' route that serves AUDIO_DOWNLOAD_DIR.
+        with patch.dict(
+            os.environ,
+            _base_env(PUBLIC_HOST_URL="https://ytdl.example.com", PUBLIC_HOST_AUDIO_URL=""),
+            clear=False,
+        ):
+            c = Config()
+        self.assertEqual(c.PUBLIC_HOST_URL, "https://ytdl.example.com/")
+        self.assertEqual(c.PUBLIC_HOST_AUDIO_URL, "audio_download/")
+
     def test_public_host_url_already_slashed_unchanged(self):
         with patch.dict(
             os.environ,
@@ -120,6 +133,58 @@ class ConfigTests(unittest.TestCase):
     def test_ytdl_nightly_update_time_invalid_exits(self):
         for bad in ("25:00", "4am", "12:60"):
             with patch.dict(os.environ, _base_env(YTDL_NIGHTLY_UPDATE_TIME=bad), clear=False):
+                with self.assertRaises(SystemExit):
+                    Config()
+
+    def test_invalid_max_concurrent_downloads_exits(self):
+        for bad in ("0", "-1", "abc"):
+            with patch.dict(os.environ, _base_env(MAX_CONCURRENT_DOWNLOADS=bad), clear=False):
+                with self.assertRaises(SystemExit):
+                    Config()
+
+    def test_invalid_port_exits(self):
+        for bad in ("0", "70000", "notaport"):
+            with patch.dict(os.environ, _base_env(PORT=bad), clear=False):
+                with self.assertRaises(SystemExit):
+                    Config()
+
+    def test_invalid_clear_completed_after_exits(self):
+        for bad in ("-5", "soon"):
+            with patch.dict(os.environ, _base_env(CLEAR_COMPLETED_AFTER=bad), clear=False):
+                with self.assertRaises(SystemExit):
+                    Config()
+
+    def test_clear_completed_after_zero_allowed(self):
+        with patch.dict(os.environ, _base_env(CLEAR_COMPLETED_AFTER="0"), clear=False):
+            c = Config()
+        self.assertEqual(c.CLEAR_COMPLETED_AFTER, "0")
+
+    def test_invalid_default_option_playlist_item_limit_exits(self):
+        for bad in ("-1", "many"):
+            with patch.dict(os.environ, _base_env(DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT=bad), clear=False):
+                with self.assertRaises(SystemExit):
+                    Config()
+
+    def test_default_option_playlist_item_limit_zero_allowed(self):
+        with patch.dict(os.environ, _base_env(DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT="0"), clear=False):
+            c = Config()
+        self.assertEqual(c.DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT, "0")
+
+    def test_invalid_subscription_default_check_interval_exits(self):
+        for bad in ("0", "-1", "often"):
+            with patch.dict(os.environ, _base_env(SUBSCRIPTION_DEFAULT_CHECK_INTERVAL=bad), clear=False):
+                with self.assertRaises(SystemExit):
+                    Config()
+
+    def test_invalid_subscription_scan_playlist_end_exits(self):
+        for bad in ("0", "-1", "all"):
+            with patch.dict(os.environ, _base_env(SUBSCRIPTION_SCAN_PLAYLIST_END=bad), clear=False):
+                with self.assertRaises(SystemExit):
+                    Config()
+
+    def test_invalid_subscription_max_seen_ids_exits(self):
+        for bad in ("0", "-1", "unlimited"):
+            with patch.dict(os.environ, _base_env(SUBSCRIPTION_MAX_SEEN_IDS=bad), clear=False):
                 with self.assertRaises(SystemExit):
                     Config()
 

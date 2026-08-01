@@ -77,8 +77,14 @@ export class DownloadsService {
       const data: Download = JSON.parse(strdata);
       const key = this.getDownloadKey(data);
       const dl: Download | undefined  = this.queue.get(key);
-      data.checked = !!dl?.checked;
-      data.deleting = !!dl?.deleting;
+      // An 'added' event always precedes legitimate updates. If the row is
+      // gone (canceled/completed already processed), this update is stale —
+      // applying it would resurrect a ghost row until the next full refresh.
+      if (!dl) {
+        return;
+      }
+      data.checked = !!dl.checked;
+      data.deleting = !!dl.deleting;
       this.queue.set(key, data);
       this.updated.next();
     });
@@ -175,8 +181,16 @@ export class DownloadsService {
     );
   }
 
+  public retry(id: string) {
+    return this.http.post<Status>('retry', { id: id }).pipe(
+      catchError(this.handleHTTPError)
+    );
+  }
+
   public startById(ids: string[]) {
-    return this.http.post('start', {ids: ids});
+    return this.http.post<Status>('start', {ids: ids}).pipe(
+      catchError(this.handleHTTPError)
+    );
   }
 
   public pauseById(ids: string[]) {
@@ -203,22 +217,20 @@ export class DownloadsService {
         this.doneChanged.next();
       }
     }
-    return this.http.post('delete', {where: where, ids: ids}).pipe(
-      catchError((error: HttpErrorResponse) => {
+    return this.http.post<Status>('delete', {where: where, ids: ids}).pipe(
+      catchError((err: HttpErrorResponse) => {
+        // Request failed — the rows would otherwise stay disabled forever
+        // with no way to retry, since nothing ever clears `deleting`.
         if (map) {
-          for (const [id, obj, deleting] of touched) {
-            obj.deleting = deleting;
-            if (where === 'done' && !map.has(id)) {
-              map.set(id, obj);
+          for (const id of ids) {
+            const obj = map.get(id);
+            if (obj) {
+              obj.deleting = false;
             }
           }
-          if (where === 'queue') {
-            this.queueChanged.next();
-          } else if (where === 'done') {
-            this.doneChanged.next();
-          }
         }
-        return throwError(() => error);
+        (where === 'queue' ? this.queueChanged : this.doneChanged).next();
+        return this.handleHTTPError(err);
       })
     );
   }

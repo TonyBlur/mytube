@@ -4,6 +4,7 @@ import { Subject, of } from 'rxjs';
 import { App } from './app';
 import { DownloadsService } from './services/downloads.service';
 import { SubscriptionsService } from './services/subscriptions.service';
+import { ToastService } from './services/toast.service';
 import { CookieService } from 'ngx-cookie-service';
 import { Download } from './interfaces';
 
@@ -20,6 +21,7 @@ class DownloadsServiceStub {
   ytdlOptionsChanged = new Subject<Record<string, unknown>>();
   updated = new Subject<void>();
   completedDownload = new Subject<Download>();
+  retryCalls: string[] = [];
 
   getCookieStatus() {
     return of({ status: 'ok', has_cookies: false });
@@ -30,6 +32,11 @@ class DownloadsServiceStub {
   }
 
   add() {
+    return of({ status: 'ok' as const });
+  }
+
+  retry(id: string) {
+    this.retryCalls.push(id);
     return of({ status: 'ok' as const });
   }
 
@@ -76,7 +83,10 @@ class SubscriptionsServiceStub {
     return of({});
   }
 
-  update() {
+  updateCalls: [string, unknown][] = [];
+
+  update(id: string, changes: unknown) {
+    this.updateCalls.push([id, changes]);
     return of({ status: 'ok' as const });
   }
 
@@ -138,6 +148,12 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     const app = fixture.componentInstance;
     expect(app).toBeTruthy();
+  });
+
+  it('asIsOrder returns a stable comparator value (insertion order preserved)', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    expect(app.asIsOrder()).toBe(0);
   });
 
   it('hides manual override input when disabled', () => {
@@ -264,8 +280,36 @@ describe('App', () => {
     expect(payload.clipEnd).toBe('1:20');
   });
 
+  it('retries a failed download by its server-side queue id', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const download = {
+      id: 'vid1',
+      title: 'Test Video',
+      url: 'https://example.com/v',
+      download_type: 'video',
+      quality: 'best',
+      format: 'any',
+      folder: '',
+      custom_name_prefix: '',
+      playlist_item_limit: 0,
+      status: 'error',
+      msg: 'temporary failure',
+      percent: 0,
+      speed: 0,
+      eta: 0,
+      filename: '',
+      checked: false,
+    };
+
+    app.retryDownload(download.url, download);
+
+    expect(downloads.retryCalls).toEqual([download.url]);
+  });
+
   it('blocks subscribe with invalid title regex', () => {
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    const toasts = TestBed.inject(ToastService);
+    const errorSpy = vi.spyOn(toasts, 'error').mockImplementation(() => undefined);
     const fixture = TestBed.createComponent(App);
     const app = fixture.componentInstance;
     const subs = TestBed.inject(SubscriptionsService) as unknown as SubscriptionsServiceStub;
@@ -273,7 +317,40 @@ describe('App', () => {
     app.titleRegex = '[';
     app.addSubscription();
     expect(subs.subscribeCalls.length).toBe(0);
-    expect(alertSpy).toHaveBeenCalledWith('Invalid subscription title filter (regex)');
-    alertSpy.mockRestore();
+    expect(errorSpy).toHaveBeenCalledWith('Invalid subscription title filter (regex)');
+    errorSpy.mockRestore();
+  });
+
+  it('renames a subscription and closes the inline editor', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const subs = TestBed.inject(SubscriptionsService) as unknown as SubscriptionsServiceStub;
+
+    app.beginEditName('sub1', 'Videos');
+    expect(app.editingNameId).toBe('sub1');
+    expect(app.nameEditDraft).toBe('Videos');
+
+    app.nameEditDraft = '  Jane uploads  ';
+    app.saveName('sub1');
+
+    expect(subs.updateCalls).toEqual([['sub1', { name: 'Jane uploads' }]]);
+    expect(app.editingNameId).toBeNull();
+  });
+
+  it('blocks renaming a subscription to an empty name', () => {
+    const toasts = TestBed.inject(ToastService);
+    const errorSpy = vi.spyOn(toasts, 'error').mockImplementation(() => undefined);
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const subs = TestBed.inject(SubscriptionsService) as unknown as SubscriptionsServiceStub;
+
+    app.beginEditName('sub1', 'Videos');
+    app.nameEditDraft = '   ';
+    app.saveName('sub1');
+
+    expect(subs.updateCalls.length).toBe(0);
+    expect(app.editingNameId).toBe('sub1');
+    expect(errorSpy).toHaveBeenCalledWith('Subscription name must not be empty');
+    errorSpy.mockRestore();
   });
 });

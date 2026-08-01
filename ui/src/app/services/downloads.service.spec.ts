@@ -139,6 +139,14 @@ describe('DownloadsService', () => {
     req.flush({ presets: ['Preset A'] });
   });
 
+  it('retry() posts the failed download id', () => {
+    service.retry('https://example.com/v').subscribe();
+    const req = httpMock.expectOne('retry');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ id: 'https://example.com/v' });
+    req.flush({ status: 'ok' });
+  });
+
   it('cancelAdd posts to cancel-add', () => {
     service.cancelAdd().subscribe();
     const req = httpMock.expectOne('cancel-add');
@@ -209,6 +217,60 @@ describe('DownloadsService', () => {
     const req = httpMock.expectOne('delete');
     expect(req.request.body).toEqual({ where: 'done', ids: ['unique-key'] });
     req.flush({});
+
+  it('delById resets deleting flag and emits error status on HTTP failure', () => {
+    const dl: Download = {
+      id: '1',
+      title: 't',
+      url: 'u1',
+      download_type: 'video',
+      quality: 'best',
+      format: 'any',
+      folder: '',
+      custom_name_prefix: '',
+      playlist_item_limit: 0,
+      status: 'finished',
+      msg: '',
+      percent: 0,
+      speed: 0,
+      eta: 0,
+      filename: '',
+      checked: false,
+      deleting: false,
+    };
+    service.queue.set('u1', dl);
+    let queueChangedCount = 0;
+    service.queueChanged.subscribe(() => queueChangedCount++);
+    let result: unknown;
+    let threw = false;
+
+    service.delById('queue', ['u1']).subscribe({
+      next: (res) => { result = res; },
+      error: () => { threw = true; },
+    });
+    expect(dl.deleting).toBe(true);
+    const req = httpMock.expectOne('delete');
+    req.flush({ msg: 'boom' }, { status: 500, statusText: 'Server Error' });
+
+    expect(threw).toBe(false);
+    expect(dl.deleting).toBe(false);
+    expect(queueChangedCount).toBeGreaterThan(0);
+    expect((result as { status: string }).status).toBe('error');
+  });
+
+  it('startById surfaces HTTP errors as a status object instead of throwing', () => {
+    let result: unknown;
+    let threw = false;
+
+    service.startById(['a']).subscribe({
+      next: (res) => { result = res; },
+      error: () => { threw = true; },
+    });
+    const req = httpMock.expectOne('start');
+    req.flush({ msg: 'nope' }, { status: 500, statusText: 'Server Error' });
+
+    expect(threw).toBe(false);
+    expect((result as { status: string }).status).toBe('error');
   });
 
   it('handleHTTPError extracts msg from object body', async () => {
@@ -276,6 +338,15 @@ describe('DownloadsService', () => {
     const updated = service.queue.get('u1');
     expect(updated?.checked).toBe(true);
     expect(updated?.deleting).toBe(true);
+  });
+
+  it('socket updated ignores events for urls not already in the queue', () => {
+    expect(service.queue.has('unknown-url')).toBe(false);
+    socket.emit(
+      'updated',
+      JSON.stringify({ url: 'unknown-url', title: 't', status: 'downloading' }),
+    );
+    expect(service.queue.has('unknown-url')).toBe(false);
   });
 
   it('socket completed moves entry to done and emits completedDownload', () => {
